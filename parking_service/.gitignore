@@ -1,0 +1,11 @@
+# Go
+/bin/
+/pkg/
+*.exe
+*.exe~
+*.test
+*.out
+/vendor/
+
+# VS Code
+.vscode/
