@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 type EventType int
 
 const (
@@ -8,7 +10,15 @@ const (
 	ExpireEvent
 )
 
+const (
+	SourceUser       = "USER"
+	SourceSimulation = "SIMULATION"
+)
+
 type Event struct {
-	Type   EventType
-	SpotID int
+	Type      EventType
+	SpotID    int
+	UserID    *int
+	Timestamp time.Time
+	Source    string // USER | SIMULATION
 }
