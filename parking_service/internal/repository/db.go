@@ -3,14 +3,19 @@ package repository
 import (
 	"context"
 	"fmt"
-
-	//"os"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func NewDB() (*pgxpool.Pool, error) {
-	dsn := "postgres://postgres:2004@localhost:5432/parking_service?sslmode=disable"
+
+	dsn := os.Getenv("DATABASE_URL")
+
+	// если переменная окружения не задана — используем локальную БД
+	if dsn == "" {
+		dsn = "postgres://postgres:2004@localhost:5432/parking_service?sslmode=disable"
+	}
 
 	dbpool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
@@ -22,5 +27,6 @@ func NewDB() (*pgxpool.Pool, error) {
 	}
 
 	fmt.Println("Connected to PostgreSQL")
+
 	return dbpool, nil
 }

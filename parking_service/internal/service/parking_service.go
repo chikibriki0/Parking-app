@@ -11,6 +11,14 @@ import (
 type ParkingRepository interface {
 	StartParking(userID *int, spotID int, start time.Time, source string) error
 	EndParking(spotID int, end time.Time) error
+	GetActiveParking(userID int) (int, time.Time, error)
+	GetUserHistory(userID int) ([]map[string]interface{}, error)
+
+	GetStats() (int, int, int, error)   // ← добавь
+}
+
+func (s *ParkingService) GetStats() (int, int, int, error) {
+	return s.repo.GetStats()
 }
 
 // 🔹 Сервис бизнес-логики
@@ -61,4 +69,14 @@ func (s *ParkingService) HandleEvent(e model.Event) error {
 	}
 
 	return nil
+}
+
+
+func (s *ParkingService) GetActiveParking(userID int) (int, time.Time, error) {
+	return s.repo.GetActiveParking(userID)
+}
+
+
+func (s *ParkingService) GetUserHistory(userID int) ([]map[string]interface{}, error) {
+	return s.repo.GetUserHistory(userID)
 }

@@ -1,0 +1,15 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "contact": {}
+    },
+    "paths": {},
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "API сервиса управления парковочными местами",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

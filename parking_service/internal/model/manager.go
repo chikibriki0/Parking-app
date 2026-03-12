@@ -29,8 +29,16 @@ func (m *ParkingManager) SimulateTraffic() {
 
 			id := m.SpotIDs[rand.Intn(len(m.SpotIDs))]
 
+			var eventType EventType
+
+			if rand.Intn(100) < 60 {
+				eventType = ReserveEvent
+			} else {
+				eventType = ReleaseEvent
+			}
+
 			m.Events <- Event{
-				Type:      ReserveEvent,
+				Type:      eventType,
 				SpotID:    id,
 				Source:    SourceSimulation,
 				Timestamp: time.Now(),
