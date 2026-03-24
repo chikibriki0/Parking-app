@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Parking Map</title>
+</head>
+<body>
+
+<h2>🚗 Parking Map</h2>
+<div id="map"></div>
+
+<script>
+const ws = new WebSocket("ws://localhost:8080/ws");
+
+const spots = {};
+const mapDiv = document.getElementById("map");
+
+// ⚠️ ВСТАВЬ СЮДА СВОЙ JWT ТОКЕН
+const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQ0NDY3NjcsInJvbGUiOiJVU0VSIiwidXNlcl9pZCI6MX0.aizwFgtfeXxBOuw6R2HqnlOaKTHpb84oz72TV8a6D14";
+
+for (let i = 1; i <= 15; i++) {
+  const el = document.createElement("div");
+
+  el.id = "spot-" + i;
+  el.innerText = i;
+  el.style.width = "50px";
+  el.style.height = "50px";
+  el.style.margin = "5px";
+  el.style.display = "inline-block";
+  el.style.textAlign = "center";
+  el.style.lineHeight = "50px";
+  el.style.border = "1px solid black";
+  el.style.background = "green";
+  el.style.cursor = "pointer";
+
+  // 🔥 КЛИК ПО МЕСТУ
+  el.onclick = async () => {
+    const status = spots[i];
+
+    if (status === "FREE") {
+      await fetch(`http://localhost:8080/reserve/${i}`, {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + TOKEN
+        }
+      });
+    } else {
+      await fetch(`http://localhost:8080/release/${i}`, {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + TOKEN
+        }
+      });
+    }
+  };
+
+  mapDiv.appendChild(el);
+  spots[i] = "FREE";
+}
+
+// 🔥 ОБНОВЛЕНИЯ ЧЕРЕЗ WS
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  const spotId = data.spot_id;
+  const isOccupied = data.type == 0;
+
+  spots[spotId] = isOccupied ? "OCCUPIED" : "FREE";
+
+  const el = document.getElementById("spot-" + spotId);
+
+  if (isOccupied) {
+    el.style.background = "red";
+  } else {
+    el.style.background = "green";
+  }
+};
+</script>
+
+</body>
+</html>

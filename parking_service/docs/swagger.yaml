@@ -1,6 +1,98 @@
+definitions:
+  model.ParkingMap:
+    properties:
+      zones:
+        items:
+          $ref: '#/definitions/model.ZoneWithSpots'
+        type: array
+    type: object
+  model.SpotDTO:
+    properties:
+      id:
+        type: integer
+      spot_number:
+        type: integer
+      status:
+        type: string
+      zone_id:
+        type: integer
+    type: object
+  model.ZoneWithSpots:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      spots:
+        items:
+          $ref: '#/definitions/model.SpotDTO'
+        type: array
+    type: object
 info:
   contact: {}
-paths: {}
+paths:
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Выполняет вход пользователя и возвращает JWT токен
+      parameters:
+      - description: Email и пароль
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Invalid credentials
+          schema:
+            type: string
+      summary: Авторизация пользователя
+      tags:
+      - auth
+  /parking/map:
+    get:
+      description: Возвращает все зоны и парковочные места
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.ParkingMap'
+      summary: Получить карту парковки
+      tags:
+      - parking
+  /reserve/{id}:
+    post:
+      description: Резервирует парковочное место по ID
+      parameters:
+      - description: ID парковочного места
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Reservation requested
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: Резервирование парковочного места
+      tags:
+      - parking
 securityDefinitions:
   BearerAuth:
     description: API сервиса управления парковочными местами

@@ -3,9 +3,13 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
 	"parking-service/internal/model"
+	"time"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"parking-service/internal/service"
+	"log"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type ParkingRepository struct {
@@ -23,19 +27,49 @@ func (r *ParkingRepository) StartParking(
 	source string,
 ) error {
 
+	log.Println("START PARKING CALLED:", userID, spotID)
+
+	if userID == nil {
+		return errors.New("userID is required")
+	}
+
 	ctx := context.Background()
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
+	// 🔥 ПРОВЕРКА: уже есть активная парковка?
+	var exists int
+	err = tx.QueryRow(ctx, `
+		SELECT 1
+		FROM parking_sessions
+		WHERE user_id = $1 AND end_time IS NULL
+		LIMIT 1
+	`, *userID).Scan(&exists)
+
+	if err == nil {
+		return errors.New("user already has active parking")
+	}
+
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	// 🔥 проверка места
 	var status string
 	err = tx.QueryRow(ctx,
 		`SELECT status FROM parking_spots WHERE id = $1 FOR UPDATE`,
 		spotID,
 	).Scan(&status)
+
+	
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("spot not found")
+		}
 		return err
 	}
 
@@ -43,6 +77,7 @@ func (r *ParkingRepository) StartParking(
 		return errors.New("spot already occupied")
 	}
 
+	// 🔥 обновляем место
 	_, err = tx.Exec(ctx,
 		`UPDATE parking_spots SET status = 'OCCUPIED' WHERE id = $1`,
 		spotID,
@@ -51,15 +86,24 @@ func (r *ParkingRepository) StartParking(
 		return err
 	}
 
+	log.Println("INSERT SESSION:", *userID, spotID)
+
+	// 🔥 вставка
 	_, err = tx.Exec(ctx,
-		`INSERT INTO parking_history (user_id, spot_id, start_time, source)
+		`INSERT INTO parking_sessions (user_id, spot_id, start_time, source)
 		 VALUES ($1, $2, $3, $4)`,
-		userID, spotID, start, source,
+		*userID, spotID, start, source,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == "23505" {
+				return errors.New("user already has active parking")
+			}
+		}
 		return err
 	}
-
+	log.Println("SESSION CREATED SUCCESSFULLY")
 	return tx.Commit(ctx)
 }
 
@@ -70,23 +114,43 @@ func (r *ParkingRepository) EndParking(
 
 	ctx := context.Background()
 	tx, err := r.db.Begin(ctx)
+
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	cmd, err := tx.Exec(ctx,
-		`UPDATE parking_history
-		 SET end_time = $1
-		 WHERE spot_id = $2 AND end_time IS NULL`,
-		end, spotID,
+	var userID int
+	var startTime time.Time
+
+	err = tx.QueryRow(ctx,
+		`SELECT user_id, start_time FROM parking_sessions
+		 WHERE spot_id = $1`,
+		spotID,
+	).Scan(&userID, &startTime)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // нет активной сессии — это нормально
+		}
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO parking_history (user_id, spot_id, start_time, end_time, source)
+		 VALUES ($1, $2, $3, $4, 'SYSTEM')`,
+		userID, spotID, startTime, end,
 	)
 	if err != nil {
 		return err
 	}
 
-	if cmd.RowsAffected() == 0 {
-		return errors.New("no active parking session")
+	_, err = tx.Exec(ctx,
+		`DELETE FROM parking_sessions WHERE spot_id = $1`,
+		spotID,
+	)
+	if err != nil {
+		return err
 	}
 
 	_, err = tx.Exec(ctx,
@@ -148,64 +212,32 @@ func (r *ParkingRepository) GetAllSpots() ([]model.SpotDTO, error) {
 	return spots, nil
 }
 
-
 func (r *ParkingRepository) GetActiveParking(userID int) (int, time.Time, error) {
+
+	row := r.db.QueryRow(
+		context.Background(),
+		`
+		SELECT spot_id, start_time
+		FROM parking_sessions
+		WHERE user_id = $1 AND end_time IS NULL
+		`,
+		userID,
+	)
 
 	var spotID int
 	var start time.Time
 
-	err := r.db.QueryRow(context.Background(),
-		`SELECT spot_id, start_time
-		 FROM parking_history
-		 WHERE user_id = $1
-		 AND end_time IS NULL
-		 ORDER BY id DESC
-		 LIMIT 1`,
-		userID,
-	).Scan(&spotID, &start)
+	err := row.Scan(&spotID, &start)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, time.Time{}, pgx.ErrNoRows
+	}
 
 	if err != nil {
 		return 0, time.Time{}, err
 	}
 
 	return spotID, start, nil
-}
-
-func (r *ParkingRepository) GetUserHistory(userID int) ([]map[string]interface{}, error) {
-
-	rows, err := r.db.Query(context.Background(),
-		`SELECT spot_id, start_time, end_time
-		 FROM parking_history
-		 WHERE user_id = $1
-		 ORDER BY start_time DESC`,
-		userID,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	history := []map[string]interface{}{}
-
-	for rows.Next() {
-		var spotID int
-		var start time.Time
-		var end *time.Time
-
-		err := rows.Scan(&spotID, &start, &end)
-		if err != nil {
-			return nil, err
-		}
-
-		history = append(history, map[string]interface{}{
-			"spot_id":    spotID,
-			"start_time": start,
-			"end_time":   end,
-		})
-	}
-
-	return history, nil
 }
 
 func (r *ParkingRepository) GetStats() (int, int, int, error) {
@@ -265,8 +297,42 @@ func (r *ParkingRepository) GetSpotsByZone(zoneID int) ([]model.SpotDTO, error) 
 
 	return spots, nil
 }
+func (r *ParkingRepository) GetUserHistory(userID int) ([]map[string]interface{}, error) {
 
+	rows, err := r.db.Query(context.Background(),
+		`SELECT spot_id, start_time, end_time
+		 FROM parking_history
+		 WHERE user_id = $1
+		 ORDER BY start_time DESC`,
+		userID,
+	)
 
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	history := []map[string]interface{}{}
+
+	for rows.Next() {
+		var spotID int
+		var start time.Time
+		var end *time.Time
+
+		err := rows.Scan(&spotID, &start, &end)
+		if err != nil {
+			return nil, err
+		}
+
+		history = append(history, map[string]interface{}{
+			"spot_id":    spotID,
+			"start_time": start,
+			"end_time":   end,
+		})
+	}
+
+	return history, nil
+}
 func (r *ParkingRepository) GetParkingMap() ([]model.ZoneWithSpots, error) {
 
 	rows, err := r.db.Query(context.Background(), `
@@ -320,4 +386,8 @@ func (r *ParkingRepository) GetParkingMap() ([]model.ZoneWithSpots, error) {
 	}
 
 	return result, nil
+
+	
 }
+
+var _ service.ParkingRepository = (*ParkingRepository)(nil)

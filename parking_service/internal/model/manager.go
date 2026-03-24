@@ -6,22 +6,33 @@ import (
 )
 
 type ParkingManager struct {
-	Events  chan Event
-	SpotIDs []int
+	Events    chan Event
+	SpotIDs   []int
+	spotState map[int]string // локальное состояние: FREE / OCCUPIED
 }
 
 func NewParkingManager(spotIDs []int) *ParkingManager {
+	state := make(map[int]string)
+
+	// все места изначально свободны
+	for _, id := range spotIDs {
+		state[id] = "FREE"
+	}
+
 	return &ParkingManager{
-		Events:  make(chan Event, 10),
-		SpotIDs: spotIDs,
+		Events:    make(chan Event, 100),
+		SpotIDs:   spotIDs,
+		spotState: state,
 	}
 }
 
-// Имитация трафика (ТОЛЬКО события)
+// Умная симуляция
 func (m *ParkingManager) SimulateTraffic() {
 	go func() {
+		rand.Seed(time.Now().UnixNano())
+
 		for {
-			time.Sleep(time.Duration(rand.Intn(5)+1) * time.Second)
+			time.Sleep(time.Duration(rand.Intn(3)+2) * time.Second)
 
 			if len(m.SpotIDs) == 0 {
 				continue
@@ -29,12 +40,17 @@ func (m *ParkingManager) SimulateTraffic() {
 
 			id := m.SpotIDs[rand.Intn(len(m.SpotIDs))]
 
+			currentState := m.spotState[id]
+
 			var eventType EventType
 
-			if rand.Intn(100) < 60 {
+			// 🔥 умная логика
+			if currentState == "FREE" {
 				eventType = ReserveEvent
+				m.spotState[id] = "OCCUPIED"
 			} else {
 				eventType = ReleaseEvent
+				m.spotState[id] = "FREE"
 			}
 
 			m.Events <- Event{

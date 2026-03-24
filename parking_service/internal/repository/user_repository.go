@@ -17,7 +17,7 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 
 func (r *UserRepository) Create(user *model.User) error {
 	query := `
-		INSERT INTO users (email, password, role)
+		INSERT INTO public.users (email, password, role)
 		VALUES ($1, $2, $3)
 		RETURNING id, created_at
 	`
@@ -32,8 +32,8 @@ func (r *UserRepository) Create(user *model.User) error {
 func (r *UserRepository) FindByEmail(email string) (*model.User, error) {
 	query := `
 		SELECT id, email, password, role, created_at
-		FROM users
-		WHERE email = $1
+		FROM public.users
+		WHERE email=$1
 	`
 
 	user := &model.User{}
@@ -46,4 +46,3 @@ func (r *UserRepository) FindByEmail(email string) (*model.User, error) {
 
 	return user, nil
 }
-
