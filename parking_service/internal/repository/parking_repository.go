@@ -30,7 +30,8 @@ func (r *ParkingRepository) StartParking(
 	log.Println("START PARKING CALLED:", userID, spotID)
 
 	if userID == nil {
-		return errors.New("userID is required")
+		fakeID := 0
+		userID = &fakeID
 	}
 
 	ctx := context.Background()
@@ -125,7 +126,7 @@ func (r *ParkingRepository) EndParking(
 
 	err = tx.QueryRow(ctx,
 		`SELECT user_id, start_time FROM parking_sessions
-		 WHERE spot_id = $1`,
+		 WHERE spot_id = $1 AND end_time IS NULL`,
 		spotID,
 	).Scan(&userID, &startTime)
 
@@ -146,7 +147,8 @@ func (r *ParkingRepository) EndParking(
 	}
 
 	_, err = tx.Exec(ctx,
-		`DELETE FROM parking_sessions WHERE spot_id = $1`,
+		`DELETE FROM parking_sessions 
+WHERE spot_id = $1 AND end_time IS NULL`,
 		spotID,
 	)
 	if err != nil {
@@ -248,10 +250,10 @@ func (r *ParkingRepository) GetStats() (int, int, int, error) {
 
 	err := r.db.QueryRow(context.Background(),
 		`SELECT 
-		 COUNT(*) as total,
-		 COUNT(*) FILTER (WHERE status = 'OCCUPIED') as occupied,
-		 COUNT(*) FILTER (WHERE status = 'FREE') as free
-		 FROM parking_spots`,
+  (SELECT COUNT(*) FROM parking_spots) as total,
+  (SELECT COUNT(*) FROM parking_sessions WHERE end_time IS NULL) as occupied,
+  (SELECT COUNT(*) FROM parking_spots) - 
+  (SELECT COUNT(*) FROM parking_sessions WHERE end_time IS NULL) as free`,
 	).Scan(&total, &occupied, &free)
 
 	if err != nil {

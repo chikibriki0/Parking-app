@@ -7,6 +7,13 @@
 
 <h2>🚗 Parking Map</h2>
 <div id="map"></div>
+<h3 id="stats"></h3>
+
+
+<h3>📜 Моя история</h3>
+<ul id="history"></ul>
+
+
 
 <script>
 const ws = new WebSocket("ws://localhost:8080/ws");
@@ -16,7 +23,7 @@ const mapDiv = document.getElementById("map");
 let mySpot = null;
 
 // ⚠️ ВСТАВЬ СЮДА СВОЙ JWT ТОКЕН
-const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQ0NDg0ODIsInJvbGUiOiJVU0VSIiwidXNlcl9pZCI6MX0.8bvYxIeAmOwHBYBbJDXqFlrCJMFjETBGs4lBi_69Uk8";
+const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQ0NTAwMTMsInJvbGUiOiJVU0VSIiwidXNlcl9pZCI6MX0.sYwQXGJrSsOB9CsOcYotO-eBYd9vl4Biy3Y8NjEGLUY";
 
 // 🔥 СОЗДАЁМ МЕСТА
 for (let i = 1; i <= 15; i++) {
@@ -117,6 +124,42 @@ ws.onmessage = (event) => {
     el.style.background = "green";
   }
 };
+
+
+async function loadStats() {
+  const res = await fetch("http://localhost:8080/stats");
+  const data = await res.json();
+
+  document.getElementById("stats").innerText =
+    `Всего: ${data.total_spots}, Свободно: ${data.free}, Занято: ${data.occupied}`;
+}
+
+setInterval(loadStats, 2000);
+loadStats();
+
+
+async function loadHistory() {
+  const res = await fetch("http://localhost:8080/my/history", {
+    headers: {
+      "Authorization": "Bearer " + TOKEN
+    }
+  });
+
+  const data = await res.json();
+
+  const list = document.getElementById("history");
+  list.innerHTML = "";
+
+  data.forEach(item => {
+    const li = document.createElement("li");
+    li.innerText = `Место ${item.spot_id}: ${item.start_time} → ${item.end_time || "..."}`;
+    list.appendChild(li);
+  });
+}
+
+setInterval(loadHistory, 3000);
+loadHistory();
+
 </script>
 
 </body>
