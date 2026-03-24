@@ -13,10 +13,12 @@ const ws = new WebSocket("ws://localhost:8080/ws");
 
 const spots = {};
 const mapDiv = document.getElementById("map");
+let mySpot = null;
 
 // ⚠️ ВСТАВЬ СЮДА СВОЙ JWT ТОКЕН
-const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQ0NDY3NjcsInJvbGUiOiJVU0VSIiwidXNlcl9pZCI6MX0.aizwFgtfeXxBOuw6R2HqnlOaKTHpb84oz72TV8a6D14";
+const TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQ0NDg0ODIsInJvbGUiOiJVU0VSIiwidXNlcl9pZCI6MX0.8bvYxIeAmOwHBYBbJDXqFlrCJMFjETBGs4lBi_69Uk8";
 
+// 🔥 СОЗДАЁМ МЕСТА
 for (let i = 1; i <= 15; i++) {
   const el = document.createElement("div");
 
@@ -32,26 +34,63 @@ for (let i = 1; i <= 15; i++) {
   el.style.background = "green";
   el.style.cursor = "pointer";
 
-  // 🔥 КЛИК ПО МЕСТУ
-  el.onclick = async () => {
-    const status = spots[i];
+el.onclick = async () => {
+  const status = spots[i];
 
-    if (status === "FREE") {
-      await fetch(`http://localhost:8080/reserve/${i}`, {
+  try {
+    let response;
+
+    // 🔥 ЕСЛИ СВОЁ МЕСТО → освобождаем
+    if (i === mySpot) {
+      response = await fetch(`http://localhost:8080/release/${i}`, {
         method: "POST",
         headers: {
           "Authorization": "Bearer " + TOKEN
         }
       });
-    } else {
-      await fetch(`http://localhost:8080/release/${i}`, {
-        method: "POST",
-        headers: {
-          "Authorization": "Bearer " + TOKEN
-        }
-      });
+
+      if (response.ok) {
+        mySpot = null;
+      }
+
+      return;
     }
-  };
+
+    // 🔥 ЕСЛИ ЧУЖОЕ ЗАНЯТО
+    if (status === "OCCUPIED") {
+      alert("Место занято");
+      return;
+    }
+
+    // 🔥 ЕСЛИ СВОБОДНОЕ → резервируем
+    if (status === "FREE") {
+
+      // если уже есть место — освобождаем старое
+      if (mySpot !== null) {
+        await fetch(`http://localhost:8080/release/${mySpot}`, {
+          method: "POST",
+          headers: {
+            "Authorization": "Bearer " + TOKEN
+          }
+        });
+      }
+
+      response = await fetch(`http://localhost:8080/reserve/${i}`, {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + TOKEN
+        }
+      });
+
+      if (response.ok) {
+        mySpot = i;
+      }
+    }
+
+  } catch (err) {
+    alert("Ошибка сети");
+  }
+};
 
   mapDiv.appendChild(el);
   spots[i] = "FREE";
@@ -69,7 +108,11 @@ ws.onmessage = (event) => {
   const el = document.getElementById("spot-" + spotId);
 
   if (isOccupied) {
-    el.style.background = "red";
+    if (spotId === mySpot) {
+      el.style.background = "blue";
+    } else {
+      el.style.background = "red";
+    }
   } else {
     el.style.background = "green";
   }
