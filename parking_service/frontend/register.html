@@ -7,6 +7,13 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="auth-body">
+<div id="pageLoader" class="page-loader hidden">
+  <div class="loader-box">
+    <div class="spinner"></div>
+    <div class="loader-text" id="loaderText">Загрузка...</div>
+  </div>
+</div>
+  <div id="toastContainer" class="toast-container"></div>
   <div class="auth-container">
     <div class="auth-card">
       <h1>📝 Parking Service</h1>
@@ -27,60 +34,6 @@
     </div>
   </div>
 
-  <script>
-    // если уже есть токен — сразу на главную
-    if (localStorage.getItem("token")) {
-      window.location.href = "index.html";
-    }
-
-    const form = document.getElementById("registerForm");
-    const errorText = document.getElementById("registerError");
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-
-      const email = document.getElementById("email").value.trim();
-      const password = document.getElementById("password").value.trim();
-
-      errorText.innerText = "";
-
-      if (!email || !password) {
-        errorText.innerText = "Введите email и пароль";
-        return;
-      }
-
-      if (password.length < 6) {
-        errorText.innerText = "Пароль должен быть не короче 6 символов";
-        return;
-      }
-
-      try {
-        const response = await fetch("http://localhost:8080/register", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ email, password })
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-
-          if (response.status === 409) {
-            errorText.innerText = "Пользователь с таким email уже существует";
-          } else {
-            errorText.innerText = "Ошибка регистрации: " + text;
-          }
-          return;
-        }
-
-        // можно сразу отправить на вход
-        window.location.href = "login.html";
-
-      } catch (err) {
-        errorText.innerText = "Ошибка соединения с сервером";
-      }
-    });
-  </script>
+  <script src="auth.js"></script>
 </body>
 </html>

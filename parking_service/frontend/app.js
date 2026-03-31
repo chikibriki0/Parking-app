@@ -1,5 +1,44 @@
 const token = localStorage.getItem("token");
 
+
+let actionInProgress = false;
+
+function showLoader(text = "Загрузка...") {
+  const loader = document.getElementById("pageLoader");
+  const loaderText = document.getElementById("loaderText");
+
+  if (loaderText) {
+    loaderText.innerText = text;
+  }
+
+  if (loader) {
+    loader.classList.remove("hidden");
+  }
+}
+
+function hideLoader() {
+  const loader = document.getElementById("pageLoader");
+  if (loader) {
+    loader.classList.add("hidden");
+  }
+}
+
+function showToast(message, type = "info") {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.innerText = message;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add("hide");
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
 // 🔒 защита страницы
 if (!token) {
   window.location.href = "login.html";
@@ -18,7 +57,11 @@ let myStartTime = null;
 
 document.getElementById("logoutBtn").addEventListener("click", () => {
   localStorage.removeItem("token");
-  window.location.href = "login.html";
+  showToast("Вы вышли из системы", "info");
+
+  setTimeout(() => {
+    window.location.href = "login.html";
+  }, 700);
 });
 
 async function loadMyParking() {
@@ -92,10 +135,13 @@ async function loadParkingMap() {
 
         el.onclick = async () => {
           const status = spots[spot.id];
-
+          if (actionInProgress) return;
           try {
-            let response;
+                actionInProgress = true;
+                el.classList.add("loading");
 
+                let response;
+            showLoader("Освобождаем место...");
             if (spot.id === mySpot) {
               response = await fetch(`http://localhost:8080/release/${spot.id}`, {
                 method: "POST",
@@ -114,17 +160,22 @@ async function loadParkingMap() {
                 await loadStats();
                 await loadHistory();
                 updateMyParkingInfo();
-              }
+
+                showToast("Парковочное место освобождено", "success");
+                } else {
+                showToast("Не удалось освободить место", "error");
+                }
 
               return;
             }
 
             if (status === "OCCUPIED") {
-              alert("Место занято");
+              showToast("Это место уже занято", "warning");
               return;
             }
 
             if (status === "FREE") {
+              showLoader("Переносим бронирование...");
               if (mySpot !== null) {
                 await fetch(`http://localhost:8080/release/${mySpot}`, {
                   method: "POST",
@@ -133,7 +184,7 @@ async function loadParkingMap() {
                   }
                 });
               }
-
+              showLoader("Бронируем место...");
               response = await fetch(`http://localhost:8080/reserve/${spot.id}`, {
                 method: "POST",
                 headers: {
@@ -142,24 +193,32 @@ async function loadParkingMap() {
               });
 
               if (response.ok) {
-                mySpot = spot.id;
-                myStartTime = new Date();
+  mySpot = spot.id;
+  myStartTime = new Date();
 
-                if (spotMeta[mySpot]) {
-                  mySpotNumber = spotMeta[mySpot].spotNumber;
-                  myZoneName = spotMeta[mySpot].zoneName;
+                    if (spotMeta[mySpot]) {
+                        mySpotNumber = spotMeta[mySpot].spotNumber;
+                        myZoneName = spotMeta[mySpot].zoneName;
+                    }
+
+                    await loadParkingMap();
+                    await loadStats();
+                    await loadHistory();
+                    updateMyParkingInfo();
+
+                    showToast(`Место ${mySpotNumber} (${myZoneName}) успешно забронировано`, "success");
+                    } else {
+                    showToast("Не удалось забронировать место", "error");
                 }
-
-                await loadParkingMap();
-                await loadStats();
-                await loadHistory();
-                updateMyParkingInfo();
-              }
             }
 
           } catch (err) {
-            alert("Ошибка сети");
-          }
+            showToast("Ошибка соединения с сервером", "error");
+          }finally {
+            actionInProgress = false;
+            el.classList.remove("loading");
+            hideLoader();
+            }
         };
 
         zoneDiv.appendChild(el);
@@ -315,12 +374,20 @@ function updateMyParkingInfo() {
 }
 
 (async () => {
-  await loadParkingMap();
-  await loadMyParking();
-  await loadParkingMap();
-  await loadStats();
-  await loadHistory();
-  updateMyParkingInfo();
+  try {
+    showLoader("Загружаем парковку...");
+
+    await loadParkingMap();
+    await loadMyParking();
+    await loadParkingMap();
+    await loadStats();
+    await loadHistory();
+    updateMyParkingInfo();
+  } catch (err) {
+    showToast("Ошибка загрузки данных", "error");
+  } finally {
+    hideLoader();
+  }
 })();
 
 setInterval(loadStats, 3000);
