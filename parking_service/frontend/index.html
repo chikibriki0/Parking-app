@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parking Service Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+
+    <div class="topbar">
+      <div class="title">🚗 Parking Service Dashboard</div>
+      <button id="logoutBtn" class="logout-btn">Выйти</button>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-color free"></div> Свободно</div>
+      <div class="legend-item"><div class="legend-color occupied"></div> Занято</div>
+      <div class="legend-item"><div class="legend-color my"></div> Моё место</div>
+    </div>
+
+    <div class="stats" id="statsCards">
+      <div class="stat-card stat-total">Всего: --</div>
+      <div class="stat-card stat-free">Свободно: --</div>
+      <div class="stat-card stat-occupied">Занято: --</div>
+    </div>
+
+    <div class="my-parking" id="myParkingInfo"></div>
+
+    <div class="zones-wrapper" id="map"></div>
+
+    <div class="history-block">
+      <div class="history-title">📜 Моя история</div>
+      <div id="history"></div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

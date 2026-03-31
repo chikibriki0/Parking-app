@@ -1,0 +1,290 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  background: #f4f6f9;
+  color: #222;
+  padding: 30px;
+}
+
+/* ===== LOGIN ===== */
+.auth-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #2d89ef, #1b4f9c);
+}
+
+.auth-container {
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-card {
+  background: white;
+  padding: 35px;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  text-align: center;
+}
+
+.auth-card h1 {
+  margin-bottom: 10px;
+  font-size: 32px;
+}
+
+.subtitle {
+  color: #666;
+  margin-bottom: 25px;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.auth-card input {
+  padding: 14px 16px;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+.auth-card button {
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  background: #2d89ef;
+  color: white;
+  font-size: 17px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.auth-card button:hover {
+  background: #1f6fd1;
+}
+
+.error-text {
+  color: #e74c3c;
+  margin-top: 15px;
+  min-height: 20px;
+}
+
+/* ===== DASHBOARD ===== */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 36px;
+  font-weight: bold;
+}
+
+.logout-btn {
+  padding: 12px 18px;
+  border: none;
+  border-radius: 12px;
+  background: #222;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.logout-btn:hover {
+  background: #444;
+}
+
+.stats,
+.my-parking,
+.history-block,
+.zone-card {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  margin-bottom: 25px;
+}
+
+.stats {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.stat-card {
+  flex: 1;
+  min-width: 180px;
+  padding: 20px;
+  border-radius: 14px;
+  color: white;
+  font-size: 22px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.stat-total { background: #2d89ef; }
+.stat-free { background: #2ecc71; }
+.stat-occupied { background: #e74c3c; }
+
+.my-parking {
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+}
+
+.zones-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+}
+
+.zone-title {
+  font-size: 28px;
+  margin-bottom: 15px;
+  font-weight: bold;
+  color: #222;
+}
+
+.spots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.spot {
+  width: 80px;
+  height: 80px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: bold;
+  color: white;
+  cursor: pointer;
+  transition: 0.2s ease;
+  border: 3px solid transparent;
+  user-select: none;
+}
+
+.spot:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+}
+
+.free {
+  background: #2ecc71;
+}
+
+.occupied {
+  background: #e74c3c;
+}
+
+.my {
+  background: #2d89ef;
+  border-color: #0f4ea8;
+}
+
+.history-title {
+  font-size: 28px;
+  margin-bottom: 20px;
+  font-weight: bold;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.history-item {
+  background: #f8f9fb;
+  border-left: 6px solid #2d89ef;
+  padding: 16px 18px;
+  border-radius: 12px;
+  line-height: 1.7;
+  font-size: 18px;
+}
+
+.empty {
+  color: #777;
+  font-size: 18px;
+}
+
+.legend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 25px;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.legend-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+@media (max-width: 768px) {
+  .spot {
+    width: 65px;
+    height: 65px;
+    font-size: 20px;
+  }
+
+  .title {
+    font-size: 28px;
+  }
+
+  .zone-title,
+  .history-title {
+    font-size: 24px;
+  }
+
+  .my-parking {
+    font-size: 20px;
+  }
+}
+
+.auth-switch {
+  margin-top: 20px;
+  font-size: 15px;
+  color: #666;
+}
+
+.auth-switch a {
+  color: #2d89ef;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.auth-switch a:hover {
+  text-decoration: underline;
+}

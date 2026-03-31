@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вход | Parking Service</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-body">
+  <div class="auth-container">
+    <div class="auth-card">
+      <h1>🚗 Parking Service</h1>
+      <p class="subtitle">Вход в систему управления парковкой</p>
+
+      <form id="loginForm">
+        <input type="email" id="email" placeholder="Email" required />
+        <input type="password" id="password" placeholder="Пароль" required />
+        <button type="submit">Войти</button>
+      </form>
+
+      <p id="loginError" class="error-text"></p>
+    </div>
+  </div>
+
+  <script>
+    // если уже есть токен — сразу на главную
+    if (localStorage.getItem("token")) {
+      window.location.href = "index.html";
+    }
+
+    const form = document.getElementById("loginForm");
+    const errorText = document.getElementById("loginError");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value.trim();
+
+      try {
+        const response = await fetch("http://localhost:8080/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ email, password })
+        });
+
+        if (!response.ok) {
+          errorText.innerText = "Неверный email или пароль";
+          return;
+        }
+
+        const data = await response.json();
+
+        localStorage.setItem("token", data.token);
+
+        window.location.href = "index.html";
+      } catch (err) {
+        errorText.innerText = "Ошибка соединения с сервером";
+      }
+    });
+  </script>
+</body>
+</html>
