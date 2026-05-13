@@ -3,13 +3,15 @@ package repository
 import (
 	"context"
 	"errors"
-	"parking-service/internal/model"
+	"log"
 	"time"
+
+	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"parking-service/internal/model"
 	"parking-service/internal/service"
-	"log"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type ParkingRepository struct {
@@ -26,70 +28,57 @@ func (r *ParkingRepository) StartParking(
 	start time.Time,
 	source string,
 ) error {
-
 	log.Println("START PARKING CALLED:", userID, spotID)
 
 	if userID == nil {
-		fakeID := 0
-		userID = &fakeID
+		// симуляция — только обновляем статус места, без сессии
+		_, err := r.db.Exec(context.Background(),
+			`UPDATE parking_spots SET status = 'OCCUPIED' WHERE id = $1`, spotID)
+		return err
 	}
 
 	ctx := context.Background()
-
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	// 🔥 ПРОВЕРКА: уже есть активная парковка?
 	var exists int
 	err = tx.QueryRow(ctx, `
-		SELECT 1
-		FROM parking_sessions
-		WHERE user_id = $1 AND end_time IS NULL
-		LIMIT 1
+		SELECT 1 FROM parking_sessions
+		WHERE user_id = $1 AND end_time IS NULL LIMIT 1
 	`, *userID).Scan(&exists)
 
 	if err == nil {
 		return errors.New("user already has active parking")
 	}
-
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 
-	// 🔥 проверка места
 	var status string
 	err = tx.QueryRow(ctx,
 		`SELECT status FROM parking_spots WHERE id = $1 FOR UPDATE`,
 		spotID,
 	).Scan(&status)
-
-	
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errors.New("spot not found")
 		}
 		return err
 	}
-
 	if status == "OCCUPIED" {
 		return errors.New("spot already occupied")
 	}
 
-	// 🔥 обновляем место
 	_, err = tx.Exec(ctx,
-		`UPDATE parking_spots SET status = 'OCCUPIED' WHERE id = $1`,
-		spotID,
-	)
+		`UPDATE parking_spots SET status = 'OCCUPIED' WHERE id = $1`, spotID)
 	if err != nil {
 		return err
 	}
 
 	log.Println("INSERT SESSION:", *userID, spotID)
-
-	// 🔥 вставка
 	_, err = tx.Exec(ctx,
 		`INSERT INTO parking_sessions (user_id, spot_id, start_time, source)
 		 VALUES ($1, $2, $3, $4)`,
@@ -97,25 +86,19 @@ func (r *ParkingRepository) StartParking(
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			if pgErr.Code == "23505" {
-				return errors.New("user already has active parking")
-			}
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return errors.New("user already has active parking")
 		}
 		return err
 	}
+
 	log.Println("SESSION CREATED SUCCESSFULLY")
 	return tx.Commit(ctx)
 }
 
-func (r *ParkingRepository) EndParking(
-	spotID int,
-	end time.Time,
-) error {
-
+func (r *ParkingRepository) EndParking(spotID int, end time.Time) error {
 	ctx := context.Background()
 	tx, err := r.db.Begin(ctx)
-
 	if err != nil {
 		return err
 	}
@@ -123,42 +106,39 @@ func (r *ParkingRepository) EndParking(
 
 	var userID int
 	var startTime time.Time
+	var source string
 
 	err = tx.QueryRow(ctx,
-		`SELECT user_id, start_time FROM parking_sessions
+		`SELECT user_id, start_time, COALESCE(source, 'SYSTEM')
+		 FROM parking_sessions
 		 WHERE spot_id = $1 AND end_time IS NULL`,
 		spotID,
-	).Scan(&userID, &startTime)
+	).Scan(&userID, &startTime, &source)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // нет активной сессии — это нормально
+			return nil
 		}
 		return err
 	}
 
 	_, err = tx.Exec(ctx,
 		`INSERT INTO parking_history (user_id, spot_id, start_time, end_time, source)
-		 VALUES ($1, $2, $3, $4, 'SYSTEM')`,
-		userID, spotID, startTime, end,
+		 VALUES ($1, $2, $3, $4, $5)`,
+		userID, spotID, startTime, end, source,
 	)
 	if err != nil {
 		return err
 	}
 
 	_, err = tx.Exec(ctx,
-		`DELETE FROM parking_sessions 
-WHERE spot_id = $1 AND end_time IS NULL`,
-		spotID,
-	)
+		`DELETE FROM parking_sessions WHERE spot_id = $1 AND end_time IS NULL`, spotID)
 	if err != nil {
 		return err
 	}
 
 	_, err = tx.Exec(ctx,
-		`UPDATE parking_spots SET status = 'FREE' WHERE id = $1`,
-		spotID,
-	)
+		`UPDATE parking_spots SET status = 'FREE' WHERE id = $1`, spotID)
 	if err != nil {
 		return err
 	}
@@ -167,14 +147,11 @@ WHERE spot_id = $1 AND end_time IS NULL`,
 }
 
 func (r *ParkingRepository) GetAllSpotIDs() ([]int, error) {
-	rows, err := r.db.Query(context.Background(),
-		`SELECT id FROM parking_spots`,
-	)
+	rows, err := r.db.Query(context.Background(), `SELECT id FROM parking_spots`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var ids []int
 	for rows.Next() {
 		var id int
@@ -189,207 +166,214 @@ func (r *ParkingRepository) GetAllSpotIDs() ([]int, error) {
 func (r *ParkingRepository) GetAllSpots() ([]model.SpotDTO, error) {
 	rows, err := r.db.Query(context.Background(),
 		`SELECT id, zone_id, spot_number, status
-		 FROM parking_spots
-		 ORDER BY zone_id, spot_number`,
-	)
+		 FROM parking_spots ORDER BY zone_id, spot_number`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var spots []model.SpotDTO
 	for rows.Next() {
 		var s model.SpotDTO
-		if err := rows.Scan(
-			&s.ID,
-			&s.ZoneID,
-			&s.SpotNumber,
-			&s.Status,
-		); err != nil {
+		if err := rows.Scan(&s.ID, &s.ZoneID, &s.SpotNumber, &s.Status); err != nil {
 			return nil, err
 		}
 		spots = append(spots, s)
 	}
-
 	return spots, nil
 }
 
 func (r *ParkingRepository) GetActiveParking(userID int) (int, time.Time, error) {
-
-	row := r.db.QueryRow(
-		context.Background(),
-		`
-		SELECT spot_id, start_time
-		FROM parking_sessions
-		WHERE user_id = $1 AND end_time IS NULL
-		`,
-		userID,
-	)
-
 	var spotID int
 	var start time.Time
-
-	err := row.Scan(&spotID, &start)
-
+	err := r.db.QueryRow(context.Background(),
+		`SELECT spot_id, start_time FROM parking_sessions
+		 WHERE user_id = $1 AND end_time IS NULL`, userID,
+	).Scan(&spotID, &start)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, time.Time{}, pgx.ErrNoRows
 	}
-
 	if err != nil {
 		return 0, time.Time{}, err
 	}
-
 	return spotID, start, nil
 }
 
 func (r *ParkingRepository) GetStats() (int, int, int, error) {
-
-	var total int
-	var occupied int
-	var free int
-
+	var total, occupied, free int
 	err := r.db.QueryRow(context.Background(),
-		`SELECT 
-  (SELECT COUNT(*) FROM parking_spots) as total,
-  (SELECT COUNT(*) FROM parking_sessions WHERE end_time IS NULL) as occupied,
-  (SELECT COUNT(*) FROM parking_spots) - 
-  (SELECT COUNT(*) FROM parking_sessions WHERE end_time IS NULL) as free`,
+		`SELECT
+		  COUNT(*),
+		  COUNT(*) FILTER (WHERE status = 'OCCUPIED'),
+		  COUNT(*) FILTER (WHERE status = 'FREE')
+		 FROM parking_spots`,
 	).Scan(&total, &occupied, &free)
-
 	if err != nil {
 		return 0, 0, 0, err
 	}
-
 	return total, occupied, free, nil
 }
 
 func (r *ParkingRepository) GetSpotsByZone(zoneID int) ([]model.SpotDTO, error) {
-
-	rows, err := r.db.Query(context.Background(), `
-		SELECT id, zone_id, spot_number, status
-		FROM parking_spots
-		WHERE zone_id = $1
-		ORDER BY spot_number
-	`, zoneID)
-
+	rows, err := r.db.Query(context.Background(),
+		`SELECT id, zone_id, spot_number, status
+		 FROM parking_spots WHERE zone_id = $1 ORDER BY spot_number`, zoneID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	spots := []model.SpotDTO{}
-
+	var spots []model.SpotDTO
 	for rows.Next() {
-
 		var s model.SpotDTO
-
-		err := rows.Scan(
-			&s.ID,
-			&s.ZoneID,
-			&s.SpotNumber,
-			&s.Status,
-		)
-
-		if err != nil {
+		if err := rows.Scan(&s.ID, &s.ZoneID, &s.SpotNumber, &s.Status); err != nil {
 			return nil, err
 		}
-
 		spots = append(spots, s)
 	}
-
 	return spots, nil
 }
+
 func (r *ParkingRepository) GetUserHistory(userID int) ([]map[string]interface{}, error) {
-
 	rows, err := r.db.Query(context.Background(),
-		`SELECT spot_id, start_time, end_time
-		 FROM parking_history
-		 WHERE user_id = $1
-		 ORDER BY start_time DESC`,
-		userID,
-	)
-
+		`SELECT spot_id, start_time, end_time FROM parking_history
+		 WHERE user_id = $1 ORDER BY start_time DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	history := []map[string]interface{}{}
-
 	for rows.Next() {
 		var spotID int
 		var start time.Time
 		var end *time.Time
-
-		err := rows.Scan(&spotID, &start, &end)
-		if err != nil {
+		if err := rows.Scan(&spotID, &start, &end); err != nil {
 			return nil, err
 		}
-
 		history = append(history, map[string]interface{}{
 			"spot_id":    spotID,
 			"start_time": start,
 			"end_time":   end,
 		})
 	}
-
 	return history, nil
 }
+
 func (r *ParkingRepository) GetParkingMap() ([]model.ZoneWithSpots, error) {
-
-	rows, err := r.db.Query(context.Background(), `
-		SELECT z.id, z.name, s.id, s.zone_id, s.spot_number, s.status
-		FROM parking_zones z
-		LEFT JOIN parking_spots s ON s.zone_id = z.id
-		ORDER BY z.id, s.spot_number
-	`)
-
+	rows, err := r.db.Query(context.Background(),
+		`SELECT z.id, z.name, s.id, s.zone_id, s.spot_number, s.status
+		 FROM parking_zones z
+		 LEFT JOIN parking_spots s ON s.zone_id = z.id
+		 ORDER BY z.id, s.spot_number`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	zones := map[int]*model.ZoneWithSpots{}
+	zoneOrder := []int{}
 
 	for rows.Next() {
-
 		var zoneID int
 		var zoneName string
 		var spot model.SpotDTO
-
-		err := rows.Scan(
-			&zoneID,
-			&zoneName,
-			&spot.ID,
-			&spot.ZoneID,
-			&spot.SpotNumber,
-			&spot.Status,
-		)
-
-		if err != nil {
+		if err := rows.Scan(&zoneID, &zoneName, &spot.ID, &spot.ZoneID, &spot.SpotNumber, &spot.Status); err != nil {
 			return nil, err
 		}
-
 		if _, ok := zones[zoneID]; !ok {
-			zones[zoneID] = &model.ZoneWithSpots{
-				ID:    zoneID,
-				Name:  zoneName,
-				Spots: []model.SpotDTO{},
-			}
+			zones[zoneID] = &model.ZoneWithSpots{ID: zoneID, Name: zoneName, Spots: []model.SpotDTO{}}
+			zoneOrder = append(zoneOrder, zoneID)
 		}
-
 		zones[zoneID].Spots = append(zones[zoneID].Spots, spot)
 	}
 
-	result := []model.ZoneWithSpots{}
-
-	for _, z := range zones {
-		result = append(result, *z)
+	result := make([]model.ZoneWithSpots, 0, len(zoneOrder))
+	for _, id := range zoneOrder {
+		result = append(result, *zones[id])
 	}
-
 	return result, nil
+}
 
-	
+// ── ADMIN ──────────────────────────────────────────────────────────────
+
+func (r *ParkingRepository) GetAllUsers() ([]map[string]interface{}, error) {
+	rows, err := r.db.Query(context.Background(),
+		`SELECT id, email, role, created_at FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	users := []map[string]interface{}{}
+	for rows.Next() {
+		var id int
+		var email, role string
+		var createdAt time.Time
+		if err := rows.Scan(&id, &email, &role, &createdAt); err != nil {
+			return nil, err
+		}
+		users = append(users, map[string]interface{}{
+			"id": id, "email": email, "role": role, "created_at": createdAt,
+		})
+	}
+	return users, nil
+}
+
+func (r *ParkingRepository) GetAllActiveSessions() ([]map[string]interface{}, error) {
+	rows, err := r.db.Query(context.Background(),
+		`SELECT ps.user_id, u.email, ps.spot_id, sp.spot_number, z.name, ps.start_time
+		 FROM parking_sessions ps
+		 JOIN users u         ON u.id  = ps.user_id
+		 JOIN parking_spots sp ON sp.id = ps.spot_id
+		 JOIN parking_zones z  ON z.id  = sp.zone_id
+		 WHERE ps.end_time IS NULL
+		 ORDER BY ps.start_time DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sessions := []map[string]interface{}{}
+	for rows.Next() {
+		var userID, spotID, spotNumber int
+		var email, zoneName string
+		var startTime time.Time
+		if err := rows.Scan(&userID, &email, &spotID, &spotNumber, &zoneName, &startTime); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, map[string]interface{}{
+			"user_id": userID, "email": email,
+			"spot_id": spotID, "spot_number": spotNumber,
+			"zone_name": zoneName, "start_time": startTime,
+		})
+	}
+	return sessions, nil
+}
+
+func (r *ParkingRepository) GetAllParkingHistory() ([]map[string]interface{}, error) {
+	rows, err := r.db.Query(context.Background(),
+		`SELECT ph.user_id, u.email, ph.spot_id, sp.spot_number, z.name, ph.start_time, ph.end_time
+		 FROM parking_history ph
+		 JOIN users u         ON u.id  = ph.user_id
+		 JOIN parking_spots sp ON sp.id = ph.spot_id
+		 JOIN parking_zones z  ON z.id  = sp.zone_id
+		 ORDER BY ph.start_time DESC LIMIT 200`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	history := []map[string]interface{}{}
+	for rows.Next() {
+		var userID, spotID, spotNumber int
+		var email, zoneName string
+		var startTime time.Time
+		var endTime *time.Time
+		if err := rows.Scan(&userID, &email, &spotID, &spotNumber, &zoneName, &startTime, &endTime); err != nil {
+			return nil, err
+		}
+		history = append(history, map[string]interface{}{
+			"user_id": userID, "email": email,
+			"spot_id": spotID, "spot_number": spotNumber,
+			"zone_name": zoneName, "start_time": startTime, "end_time": endTime,
+		})
+	}
+	return history, nil
 }
 
 var _ service.ParkingRepository = (*ParkingRepository)(nil)

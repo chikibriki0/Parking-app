@@ -17,7 +17,6 @@ const (
 
 func JWTMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			http.Error(w, "Missing token", http.StatusUnauthorized)
@@ -41,5 +40,17 @@ func JWTMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, RoleKey, claims["role"].(string))
 
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// AdminOnlyMiddleware — только после JWTMiddleware
+func AdminOnlyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role, ok := r.Context().Value(RoleKey).(string)
+		if !ok || role != "ADMIN" {
+			http.Error(w, "Forbidden: admin only", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
