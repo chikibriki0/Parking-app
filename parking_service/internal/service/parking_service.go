@@ -16,6 +16,7 @@ type ParkingRepository interface {
 	GetActiveParking(userID int) (int, time.Time, error)
 	GetUserHistory(userID int) ([]map[string]interface{}, error)
 	GetStats() (int, int, int, error)
+	ExpireOldSessions(olderThan time.Time) ([]int, error)
 	// admin
 	GetAllUsers() ([]map[string]interface{}, error)
 	GetAllActiveSessions() ([]map[string]interface{}, error)
@@ -24,30 +25,27 @@ type ParkingRepository interface {
 
 type ParkingService struct {
 	repo        ParkingRepository
-	expireAfter time.Duration
+	ExpireAfter time.Duration
 }
 
-func NewParkingService(repo ParkingRepository) *ParkingService {
+func NewParkingService(repo ParkingRepository, expireAfter time.Duration) *ParkingService {
 	return &ParkingService{
 		repo:        repo,
-		expireAfter: 2 * time.Minute,
+		ExpireAfter: expireAfter,
 	}
 }
 
+// HandleEvent applies a parking event synchronously and returns any error
+// (typed sentinel errors are defined in errors.go).
 func (s *ParkingService) HandleEvent(e model.Event) error {
 	switch e.Type {
-
 	case model.ReserveEvent:
 		if err := s.repo.StartParking(e.UserID, e.SpotID, e.Timestamp, e.Source); err != nil {
-			log.Println("START PARKING ERROR:", err)
+			if !isTypedClientError(err) {
+				log.Println("START PARKING ERROR:", err)
+			}
 			return err
 		}
-		go func(spotID int) {
-			time.Sleep(s.expireAfter)
-			if err := s.repo.EndParking(spotID, time.Now()); err == nil {
-				log.Printf("[EXPIRE] spot %d expired", spotID)
-			}
-		}(e.SpotID)
 		return nil
 
 	case model.ReleaseEvent, model.ExpireEvent:
@@ -59,6 +57,41 @@ func (s *ParkingService) HandleEvent(e model.Event) error {
 	}
 
 	return nil
+}
+
+func isTypedClientError(err error) bool {
+	return errors.Is(err, ErrUserHasActiveParking) ||
+		errors.Is(err, ErrSpotOccupied) ||
+		errors.Is(err, ErrSpotNotFound) ||
+		errors.Is(err, ErrNoActiveParking)
+}
+
+// StartExpirationSweeper runs in background, periodically ending sessions
+// older than ExpireAfter. Replaces per-event goroutines so that expirations
+// survive server restarts.
+func (s *ParkingService) StartExpirationSweeper(interval time.Duration) chan<- struct{} {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case now := <-ticker.C:
+				cutoff := now.Add(-s.ExpireAfter)
+				expired, err := s.repo.ExpireOldSessions(cutoff)
+				if err != nil {
+					log.Println("expire sweeper error:", err)
+					continue
+				}
+				if len(expired) > 0 {
+					log.Printf("[SWEEPER] expired %d sessions", len(expired))
+				}
+			}
+		}
+	}()
+	return stop
 }
 
 func (s *ParkingService) GetActiveParking(userID int) (int, time.Time, error) {

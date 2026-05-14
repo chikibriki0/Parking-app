@@ -1,4 +1,5 @@
-FROM golang:1.25-alpine
+# Multi-stage build: тонкий runtime-образ без исходников и тулчейна Go.
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -7,8 +8,16 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o parking-service ./cmd
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/parking-service ./cmd
 
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 app
+WORKDIR /app
+COPY --from=builder /out/parking-service /app/parking-service
+COPY --from=builder /app/frontend /app/frontend
+
+USER app
 EXPOSE 8080
 
-CMD ["./parking-service"]
+CMD ["/app/parking-service"]

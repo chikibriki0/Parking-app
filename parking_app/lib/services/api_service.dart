@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/app_config.dart';
 
 class ApiService {
-  // Замените на IP вашего сервера при тестировании на реальном устройстве
-  static const String baseUrl = 'http://localhost:8080';
+  static const String baseUrl = AppConfig.apiBaseUrl;
 
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -116,30 +116,58 @@ class ApiService {
     return null;
   }
 
-  static Future<bool> reserveSpot(int spotId) async {
+  static Future<Map<String, dynamic>> reserveSpot(int spotId) async {
     try {
       final headers = await _authHeaders();
       final response = await http.post(
         Uri.parse('$baseUrl/reserve/$spotId'),
         headers: headers,
       );
-      return response.statusCode == 200;
-    } catch (e) {
-      return false;
+      if (response.statusCode == 200) {
+        return {'success': true};
+      }
+      return {
+        'success': false,
+        'message': _mapReserveError(response.statusCode, response.body),
+      };
+    } catch (_) {
+      return {'success': false, 'message': 'Нет соединения с сервером'};
     }
   }
 
-  static Future<bool> releaseSpot(int spotId) async {
+  static Future<Map<String, dynamic>> releaseSpot(int spotId) async {
     try {
       final headers = await _authHeaders();
       final response = await http.post(
         Uri.parse('$baseUrl/release/$spotId'),
         headers: headers,
       );
-      return response.statusCode == 200;
-    } catch (e) {
-      return false;
+      if (response.statusCode == 200) {
+        return {'success': true};
+      }
+      return {
+        'success': false,
+        'message': 'Не удалось освободить место (код ${response.statusCode})',
+      };
+    } catch (_) {
+      return {'success': false, 'message': 'Нет соединения с сервером'};
     }
+  }
+
+  static String _mapReserveError(int code, String body) {
+    final text = body.toLowerCase();
+    if (code == 409) {
+      if (text.contains('user already has active')) {
+        return 'У вас уже есть активная парковка';
+      }
+      if (text.contains('spot already occupied')) {
+        return 'Это место уже занято';
+      }
+      return 'Конфликт: место занято или у вас уже есть бронь';
+    }
+    if (code == 404) return 'Парковочное место не найдено';
+    if (code == 401) return 'Сессия истекла — войдите заново';
+    return 'Ошибка бронирования (код $code)';
   }
 
   static Future<List<dynamic>> getMyHistory() async {

@@ -109,9 +109,9 @@ class ParkingProvider extends ChangeNotifier {
     _history = await ApiService.getMyHistory();
   }
 
-  Future<bool> reserveSpot(int spotId) async {
-    final ok = await ApiService.reserveSpot(spotId);
-    if (ok) {
+  Future<Map<String, dynamic>> reserveSpot(int spotId) async {
+    final result = await ApiService.reserveSpot(spotId);
+    if (result['success'] == true) {
       _mySpotId = spotId;
       _myStartTime = DateTime.now();
       _spotStatuses[spotId] = 'OCCUPIED';
@@ -119,12 +119,12 @@ class ParkingProvider extends ChangeNotifier {
       await loadHistory();
       notifyListeners();
     }
-    return ok;
+    return result;
   }
 
-  Future<bool> releaseSpot(int spotId) async {
-    final ok = await ApiService.releaseSpot(spotId);
-    if (ok) {
+  Future<Map<String, dynamic>> releaseSpot(int spotId) async {
+    final result = await ApiService.releaseSpot(spotId);
+    if (result['success'] == true) {
       _mySpotId = null;
       _myStartTime = null;
       _spotStatuses[spotId] = 'FREE';
@@ -132,7 +132,7 @@ class ParkingProvider extends ChangeNotifier {
       await loadHistory();
       notifyListeners();
     }
-    return ok;
+    return result;
   }
 
   String getSpotStatus(int spotId) {

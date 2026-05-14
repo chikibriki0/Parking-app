@@ -55,8 +55,8 @@ INSERT INTO parking_spots (zone_id, spot_number) VALUES
 -- Тестовые пользователи, пароль: password123
 INSERT INTO users (email, password, role) VALUES
     ('admin@parking.ru',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$2eWeZ4qPW8PUKeKOcnTXreZLUYSwcqD5KEO5tmYnMf6JP9tscUQ5a',
      'ADMIN'),
     ('user@parking.ru',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$2eWeZ4qPW8PUKeKOcnTXreZLUYSwcqD5KEO5tmYnMf6JP9tscUQ5a',
      'USER');

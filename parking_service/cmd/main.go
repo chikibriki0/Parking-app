@@ -9,10 +9,11 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -23,46 +24,59 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 
 	_ "parking-service/docs"
+	"parking-service/internal/config"
 	"parking-service/internal/model"
 	"parking-service/internal/repository"
 	"parking-service/internal/service"
 )
 
+const minPasswordLen = 6
+
 func main() {
-	db, err := repository.NewDB()
+	cfg := config.Load()
+	service.InitJWT(cfg.JWTSecret, cfg.JWTTTL)
+
+	db, err := repository.NewDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	// Сбрасываем все места в FREE при старте
-	db.Exec(context.Background(), `UPDATE parking_spots SET status = 'FREE'`)
+
 	userRepo := repository.NewUserRepository(db)
 	parkingRepo := repository.NewParkingRepository(db)
-	parkingService := service.NewParkingService(parkingRepo)
+	parkingService := service.NewParkingService(parkingRepo, cfg.ParkingExpireAfter)
+
+	// Periodic sweeper finishes sessions older than ExpireAfter,
+	// surviving server restarts.
+	parkingService.StartExpirationSweeper(15 * time.Second)
 
 	spotIDs, err := parkingRepo.GetAllSpotIDs()
 	if err != nil {
 		log.Fatal(err)
 	}
 	manager := model.NewParkingManager(spotIDs)
-	go manager.SimulateTraffic()
 
-	// Event-loop
-	go func() {
-		for event := range manager.Events {
-			log.Printf("[EVENT] type=%v spot=%d source=%q",
-				event.Type, event.SpotID, event.Source)
-			if err := parkingService.HandleEvent(event); err != nil {
-				log.Println("parking event error:", err)
+	// Симуляция включается отдельным флагом, чтобы прод-окружение
+	// не наполняло БД фейковыми событиями.
+	if cfg.SimulationEnabled {
+		log.Println("Simulation: ENABLED")
+		stopSim := make(chan struct{})
+		go manager.SimulateTraffic(stopSim)
+		// drain simulation events
+		go func() {
+			for event := range manager.Events {
+				log.Printf("[SIM] type=%v spot=%d source=%q",
+					event.Type, event.SpotID, event.Source)
+				if err := parkingService.HandleEvent(event); err != nil {
+					log.Println("simulation event error:", err)
+					continue
+				}
+				broadcastEvent(event)
 			}
-			data, _ := json.Marshal(map[string]interface{}{
-				"spot_id": event.SpotID,
-				"type":    event.Type,
-				"source":  event.Source,
-			})
-			service.Broadcast(data)
-		}
-	}()
+		}()
+	} else {
+		log.Println("Simulation: DISABLED")
+	}
 
 	mux := http.NewServeMux()
 
@@ -81,6 +95,16 @@ func main() {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
+		req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+		if _, err := mail.ParseAddress(req.Email); err != nil {
+			http.Error(w, "Invalid email format", http.StatusBadRequest)
+			return
+		}
+		if len(req.Password) < minPasswordLen {
+			http.Error(w, "Password must be at least 6 characters", http.StatusBadRequest)
+			return
+		}
+
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			http.Error(w, "Password error", http.StatusInternalServerError)
@@ -95,8 +119,13 @@ func main() {
 			http.Error(w, "Server error", http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(user)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":    user.ID,
+			"email": user.Email,
+			"role":  user.Role,
+		})
 	})
 
 	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +141,7 @@ func main() {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 		user, err := userRepo.FindByEmail(req.Email)
 		if err != nil || user == nil {
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
@@ -194,6 +224,11 @@ func main() {
 		})
 	})
 
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	mux.HandleFunc("/ws", service.WSHandler)
 	mux.Handle("/swagger/", httpSwagger.WrapHandler)
 
@@ -206,15 +241,24 @@ func main() {
 		}
 		id, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/reserve/"))
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "invalid spot id", http.StatusBadRequest)
 			return
 		}
 		userID := r.Context().Value(service.UserIDKey).(int)
-		manager.Events <- model.Event{
+		event := model.Event{
 			Type: model.ReserveEvent, SpotID: id,
 			UserID: &userID, Source: model.SourceUser, Timestamp: time.Now(),
 		}
-		w.Write([]byte("Reservation requested"))
+		if err := parkingService.HandleEvent(event); err != nil {
+			respondParkingError(w, err)
+			return
+		}
+		broadcastEvent(event)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"spot_id":    id,
+			"start_time": event.Timestamp,
+		})
 	})))
 
 	mux.Handle("/release/", service.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -224,22 +268,31 @@ func main() {
 		}
 		id, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/release/"))
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "invalid spot id", http.StatusBadRequest)
 			return
 		}
 		userID := r.Context().Value(service.UserIDKey).(int)
-		manager.Events <- model.Event{
+		event := model.Event{
 			Type: model.ReleaseEvent, SpotID: id,
 			UserID: &userID, Source: model.SourceUser, Timestamp: time.Now(),
 		}
-		w.Write([]byte("Release requested"))
+		if err := parkingService.HandleEvent(event); err != nil {
+			respondParkingError(w, err)
+			return
+		}
+		broadcastEvent(event)
+		w.Write([]byte(`{"ok":true}`))
 	})))
 
 	mux.Handle("/my/parking", service.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value(service.UserIDKey).(int)
 		spotID, startTime, err := parkingService.GetActiveParking(userID)
 		if err != nil {
-			http.Error(w, "No active parking", http.StatusNotFound)
+			if errors.Is(err, service.ErrNoActiveParking) {
+				http.Error(w, "No active parking", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "server error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -317,25 +370,59 @@ func main() {
 			http.Error(w, "invalid spot id", http.StatusBadRequest)
 			return
 		}
-		manager.Events <- model.Event{
+		event := model.Event{
 			Type: model.ReleaseEvent, SpotID: id,
 			Source: "ADMIN", Timestamp: time.Now(),
 		}
+		if err := parkingService.HandleEvent(event); err != nil {
+			respondParkingError(w, err)
+			return
+		}
+		broadcastEvent(event)
 		log.Printf("[ADMIN] force release spot %d", id)
-		w.Write([]byte("Force release requested"))
+		w.Write([]byte(`{"ok":true}`))
 	})))
 
-	// ── СТАРЫЙ web-frontend (статика) ────────────────────────────────
 	mux.Handle("/frontend/", http.StripPrefix("/frontend/", http.FileServer(http.Dir("./frontend"))))
 
-	// ── CORS + старт ─────────────────────────────────────────────────
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   cfg.CORSAllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"*"},
-		AllowCredentials: true,
+		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowCredentials: !contains(cfg.CORSAllowedOrigins, "*"),
 	})
 
-	log.Println("🚀 Server started on :8080")
-	log.Fatal(http.ListenAndServe(":8080", c.Handler(mux)))
+	log.Printf("Server started on %s", cfg.HTTPAddr)
+	log.Fatal(http.ListenAndServe(cfg.HTTPAddr, c.Handler(mux)))
+}
+
+func respondParkingError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrSpotNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, service.ErrSpotOccupied),
+		errors.Is(err, service.ErrUserHasActiveParking):
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		log.Println("parking error:", err)
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}
+}
+
+func broadcastEvent(event model.Event) {
+	data, _ := json.Marshal(map[string]interface{}{
+		"spot_id": event.SpotID,
+		"type":    event.Type,
+		"source":  event.Source,
+	})
+	service.Broadcast(data)
+}
+
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

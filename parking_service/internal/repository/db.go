@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 	"time"
-	"log"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func NewDB() (*pgxpool.Pool, error) {
-
-	dsn := "postgres://postgres:postgres@postgres:5432/parking_db?sslmode=disable"
-
+func NewDB(dsn string) (*pgxpool.Pool, error) {
 	var dbpool *pgxpool.Pool
 	var err error
 
@@ -28,6 +25,5 @@ func NewDB() (*pgxpool.Pool, error) {
 		fmt.Println("Waiting for PostgreSQL...")
 		time.Sleep(2 * time.Second)
 	}
-	log.Println("DB CONNECTED TO:", dsn)
-	return nil, err
+	return nil, fmt.Errorf("failed to connect to PostgreSQL after retries: %w", err)
 }

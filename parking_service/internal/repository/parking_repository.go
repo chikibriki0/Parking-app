@@ -51,7 +51,7 @@ func (r *ParkingRepository) StartParking(
 	`, *userID).Scan(&exists)
 
 	if err == nil {
-		return errors.New("user already has active parking")
+		return service.ErrUserHasActiveParking
 	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
@@ -64,12 +64,12 @@ func (r *ParkingRepository) StartParking(
 	).Scan(&status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return errors.New("spot not found")
+			return service.ErrSpotNotFound
 		}
 		return err
 	}
 	if status == "OCCUPIED" {
-		return errors.New("spot already occupied")
+		return service.ErrSpotOccupied
 	}
 
 	_, err = tx.Exec(ctx,
@@ -87,7 +87,7 @@ func (r *ParkingRepository) StartParking(
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return errors.New("user already has active parking")
+			return service.ErrUserHasActiveParking
 		}
 		return err
 	}
@@ -190,12 +190,78 @@ func (r *ParkingRepository) GetActiveParking(userID int) (int, time.Time, error)
 		 WHERE user_id = $1 AND end_time IS NULL`, userID,
 	).Scan(&spotID, &start)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, time.Time{}, pgx.ErrNoRows
+		return 0, time.Time{}, service.ErrNoActiveParking
 	}
 	if err != nil {
 		return 0, time.Time{}, err
 	}
 	return spotID, start, nil
+}
+
+// ExpireOldSessions ends all sessions started before the cutoff, transactionally
+// moving them to history and freeing the corresponding spots. Returns the list
+// of expired spot IDs so the caller can broadcast WS updates.
+func (r *ParkingRepository) ExpireOldSessions(cutoff time.Time) ([]int, error) {
+	ctx := context.Background()
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx,
+		`SELECT id, user_id, spot_id, start_time, COALESCE(source, 'SYSTEM')
+		 FROM parking_sessions
+		 WHERE end_time IS NULL AND start_time <= $1`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+
+	type expiredSession struct {
+		id      int
+		userID  int
+		spotID  int
+		start   time.Time
+		source  string
+	}
+	var sessions []expiredSession
+	for rows.Next() {
+		var s expiredSession
+		if err := rows.Scan(&s.id, &s.userID, &s.spotID, &s.start, &s.source); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		sessions = append(sessions, s)
+	}
+	rows.Close()
+
+	if len(sessions) == 0 {
+		return nil, tx.Commit(ctx)
+	}
+
+	now := time.Now()
+	spotIDs := make([]int, 0, len(sessions))
+	for _, s := range sessions {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO parking_history (user_id, spot_id, start_time, end_time, source)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			s.userID, s.spotID, s.start, now, "EXPIRED",
+		)
+		if err != nil {
+			return nil, err
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM parking_sessions WHERE id = $1`, s.id)
+		if err != nil {
+			return nil, err
+		}
+		_, err = tx.Exec(ctx, `UPDATE parking_spots SET status = 'FREE' WHERE id = $1`, s.spotID)
+		if err != nil {
+			return nil, err
+		}
+		spotIDs = append(spotIDs, s.spotID)
+	}
+
+	return spotIDs, tx.Commit(ctx)
 }
 
 func (r *ParkingRepository) GetStats() (int, int, int, error) {

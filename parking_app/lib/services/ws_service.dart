@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../config/app_config.dart';
 
 class WsService {
-  static const String wsUrl = 'ws://localhost:8080/ws';
+  static const String wsUrl = AppConfig.wsUrl;
 
   WebSocketChannel? _channel;
   final StreamController<Map<String, dynamic>> _controller =

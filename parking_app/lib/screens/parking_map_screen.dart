@@ -57,10 +57,14 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
         confirmColor: AppTheme.danger,
       );
       if (confirmed == true) {
-        final ok = await parking.releaseSpot(spotId);
+        final result = await parking.releaseSpot(spotId);
         if (mounted) {
+          final ok = result['success'] == true;
           _showSnack(
-              context, ok ? 'Место освобождено' : 'Ошибка', ok ? AppTheme.success : AppTheme.danger);
+            context,
+            ok ? 'Место освобождено' : (result['message'] as String? ?? 'Ошибка'),
+            ok ? AppTheme.success : AppTheme.danger,
+          );
         }
       }
       return;
@@ -83,14 +87,27 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
           confirmLabel: 'Сменить',
         );
         if (confirmed != true) return;
-        await parking.releaseSpot(mySpot);
+        final releaseResult = await parking.releaseSpot(mySpot);
+        if (releaseResult['success'] != true) {
+          if (mounted) {
+            _showSnack(
+              context,
+              releaseResult['message'] as String? ?? 'Не удалось освободить текущее место',
+              AppTheme.danger,
+            );
+          }
+          return;
+        }
       }
 
-      final ok = await parking.reserveSpot(spotId);
+      final result = await parking.reserveSpot(spotId);
       if (mounted) {
+        final ok = result['success'] == true;
         _showSnack(
           context,
-          ok ? 'Место $spotNumber (Зона $zoneName) забронировано' : 'Ошибка бронирования',
+          ok
+              ? 'Место $spotNumber (Зона $zoneName) забронировано'
+              : (result['message'] as String? ?? 'Ошибка бронирования'),
           ok ? AppTheme.success : AppTheme.danger,
         );
       }

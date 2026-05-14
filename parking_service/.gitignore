@@ -9,3 +9,7 @@
 
 # VS Code
 .vscode/
+
+# Local secrets — никогда не коммитим
+.env
+.env.local
