@@ -7,4 +7,5 @@ var (
 	ErrSpotOccupied         = errors.New("spot already occupied")
 	ErrSpotNotFound         = errors.New("spot not found")
 	ErrNoActiveParking      = errors.New("no active parking")
+	ErrExtensionTooLong     = errors.New("extension exceeds max total duration")
 )

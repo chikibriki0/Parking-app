@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
+/// StatsBar — три «iOS-карточки» в одну строку. Спокойный фон цвета
+/// поверхности, цветной акцент в иконке и значении. Без громких теней.
 class StatsBar extends StatelessWidget {
   final Map<String, dynamic> stats;
 
@@ -14,50 +16,60 @@ class StatsBar extends StatelessWidget {
 
     return Row(
       children: [
-        _statCard('Всего', '$total', AppTheme.primary, Icons.grid_view_rounded),
+        _statCard(context, 'Всего', '$total', AppTheme.primary, Icons.grid_view_rounded),
         const SizedBox(width: 10),
-        _statCard('Свободно', '$free', AppTheme.success, Icons.check_circle_outline_rounded),
+        _statCard(context, 'Свободно', '$free', AppTheme.success, Icons.check_circle_rounded),
         const SizedBox(width: 10),
-        _statCard('Занято', '$occupied', AppTheme.danger, Icons.cancel_outlined),
+        _statCard(context, 'Занято', '$occupied', AppTheme.danger, Icons.do_not_disturb_on_rounded),
       ],
     );
   }
 
-  Widget _statCard(String label, String value, Color color, IconData icon) {
+  Widget _statCard(BuildContext context, String label, String value, Color accent, IconData icon) {
+    final surface = Theme.of(context).colorScheme.surface;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = isDark ? AppTheme.textSecondaryDark : AppTheme.textSecondary;
+
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          color: surface,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: isDark
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  )
+                ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: Colors.white.withOpacity(0.85), size: 20),
-            const SizedBox(height: 6),
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(isDark ? 0.22 : 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: accent, size: 18),
+            ),
+            const SizedBox(height: 10),
             Text(
               value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 24,
-              ),
+              style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                    fontSize: 26,
+                    letterSpacing: -0.6,
+                  ),
             ),
+            const SizedBox(height: 2),
             Text(
               label,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
             ),
           ],
         ),

@@ -4,12 +4,11 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/parking_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/confirm_dialog.dart';
 import '../widgets/spot_widget.dart';
 import '../widgets/stats_bar.dart';
 import '../widgets/my_parking_card.dart';
-import 'history_screen.dart';
 import 'admin_screen.dart';
-import 'login_screen.dart';
 
 class ParkingMapScreen extends StatefulWidget {
   const ParkingMapScreen({super.key});
@@ -25,10 +24,11 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
   void initState() {
     super.initState();
     final parking = context.read<ParkingProvider>();
-    parking.init();
-    // Периодическое обновление статистики
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    // Провайдер уже инициализирован HomeScreen — здесь только таймер
+    // периодической синхронизации как страховка для WebSocket.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (mounted) {
+        parking.loadMap();
         parking.loadStats();
         parking.loadMyParking();
       }
@@ -49,12 +49,14 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
 
     // Нажали на своё место — освобождаем
     if (spotId == mySpot) {
-      final confirmed = await _showConfirmDialog(
+      final confirmed = await _confirm(
         context,
-        'Освободить место?',
-        'Место $spotNumber (Зона $zoneName) будет освобождено.',
-        confirmLabel: 'Освободить',
-        confirmColor: AppTheme.danger,
+        title: 'Освободить место?',
+        message: 'Место $spotNumber в зоне $zoneName будет освобождено. '
+            'Эту парковку всегда можно начать заново.',
+        actionLabel: 'Освободить',
+        actionColor: AppTheme.danger,
+        actionIcon: Icons.logout_rounded,
       );
       if (confirmed == true) {
         final result = await parking.releaseSpot(spotId);
@@ -72,7 +74,7 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
 
     // Занятое чужое место
     if (status == 'OCCUPIED') {
-      _showSnack(context, 'Это место уже занято', AppTheme.warning);
+      _showOccupiedSheet(context, zoneName, spotNumber);
       return;
     }
 
@@ -80,11 +82,13 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
     if (status == 'FREE') {
       if (mySpot != null) {
         // Уже есть место — предлагаем переключиться
-        final confirmed = await _showConfirmDialog(
+        final confirmed = await _confirm(
           context,
-          'Сменить место?',
-          'Ваше текущее место будет освобождено. Забронировать место $spotNumber (Зона $zoneName)?',
-          confirmLabel: 'Сменить',
+          title: 'Сменить место?',
+          message: 'Текущая бронь будет освобождена и забронировано '
+              'место $spotNumber в зоне $zoneName.',
+          actionLabel: 'Сменить место',
+          actionIcon: Icons.swap_horiz_rounded,
         );
         if (confirmed != true) return;
         final releaseResult = await parking.releaseSpot(mySpot);
@@ -114,34 +118,105 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
     }
   }
 
-  Future<bool?> _showConfirmDialog(
-    BuildContext context,
-    String title,
-    String content, {
-    String confirmLabel = 'Подтвердить',
-    Color confirmColor = AppTheme.primary,
+  // Универсальный диалог в widgets/confirm_dialog.dart — здесь просто прокси.
+  Future<bool?> _confirm(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required String actionLabel,
+    Color actionColor = AppTheme.primary,
+    IconData? actionIcon,
   }) {
-    return showDialog<bool>(
+    return showConfirmDialog(
+      context,
+      title: title,
+      message: message,
+      actionLabel: actionLabel,
+      actionColor: actionColor,
+      actionIcon: actionIcon,
+    );
+  }
+
+  void _showOccupiedSheet(BuildContext context, String zoneName, int spotNumber) {
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(title,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-        content: Text(content,
-            style: const TextStyle(color: AppTheme.textSecondary)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Отмена',
-                style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: confirmColor),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(confirmLabel),
-          ),
-        ],
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // «iOS handle»
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                margin: const EdgeInsets.only(bottom: 18),
+                decoration: BoxDecoration(
+                  color: AppTheme.separator,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: AppTheme.danger.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.do_not_disturb_on_rounded,
+                      color: AppTheme.danger, size: 26),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Место $spotNumber · Зона $zoneName',
+                          style: Theme.of(ctx).textTheme.titleLarge),
+                      const SizedBox(height: 2),
+                      Text('Сейчас занято',
+                          style: Theme.of(ctx).textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.background,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded,
+                      size: 18, color: AppTheme.textSecondary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Дождитесь, пока место освободится — статус обновится автоматически.',
+                      style: Theme.of(ctx).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Понятно'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -166,44 +241,17 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Row(
-          children: [
-            Icon(Icons.local_parking_rounded,
-                color: AppTheme.primary, size: 28),
-            SizedBox(width: 8),
-            Text('Parking Service'),
-          ],
-        ),
+        title: const Text('Парковка'),
         actions: [
           if (auth.isAdmin)
             IconButton(
-              icon: const Icon(Icons.admin_panel_settings_outlined),
+              icon: const Icon(Icons.shield_outlined),
               tooltip: 'Админ-панель',
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const AdminScreen()),
               ),
             ),
-          IconButton(
-            icon: const Icon(Icons.history_rounded),
-            tooltip: 'История',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const HistoryScreen()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Выйти',
-            onPressed: () async {
-              await auth.logout();
-              if (mounted) {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
-              }
-            },
-          ),
         ],
       ),
       body: parking.loading && parking.zones.isEmpty
@@ -318,53 +366,42 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
     final zoneName = zone['name'] as String? ?? '';
     final spots = zone['spots'] as List? ?? [];
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    'Зона $zoneName',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.primary,
-                    ),
-                  ),
+                Text(
+                  'Зона $zoneName',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const Spacer(),
                 Text(
                   '${spots.length} мест',
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 13,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             Wrap(
               spacing: 10,
               runSpacing: 10,

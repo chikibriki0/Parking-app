@@ -26,6 +26,7 @@ CREATE TABLE parking_sessions (
     user_id    INT REFERENCES users(id) ON DELETE CASCADE,
     spot_id    INT REFERENCES parking_spots(id) ON DELETE CASCADE,
     start_time TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP,
     end_time   TIMESTAMP,
     source     TEXT,
     created_at TIMESTAMP DEFAULT NOW()
@@ -45,12 +46,14 @@ CREATE TABLE parking_history (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-INSERT INTO parking_zones (name, total_spots) VALUES ('A', 5), ('B', 5), ('C', 5);
+-- 3 парковочные зоны, каждая на 48 мест (6 секций × 8 машиномест).
+INSERT INTO parking_zones (name, total_spots) VALUES ('A', 48), ('B', 48), ('C', 48);
 
-INSERT INTO parking_spots (zone_id, spot_number) VALUES
-    (1,1),(1,2),(1,3),(1,4),(1,5),
-    (2,1),(2,2),(2,3),(2,4),(2,5),
-    (3,1),(3,2),(3,3),(3,4),(3,5);
+-- 48 машиномест в каждой зоне = 144 записи в parking_spots.
+INSERT INTO parking_spots (zone_id, spot_number)
+SELECT z.id, gs
+FROM parking_zones z
+CROSS JOIN generate_series(1, 48) gs;
 
 -- Тестовые пользователи, пароль: password123
 INSERT INTO users (email, password, role) VALUES

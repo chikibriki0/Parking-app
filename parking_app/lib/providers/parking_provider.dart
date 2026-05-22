@@ -7,9 +7,11 @@ class ParkingProvider extends ChangeNotifier {
   final Map<int, String> _spotStatuses = {};
   int? _mySpotId;
   DateTime? _myStartTime;
+  DateTime? _myExpiresAt;
   Map<String, dynamic>? _stats;
   List<dynamic> _history = [];
   bool _loading = false;
+  bool _initialized = false;
 
   final WsService _wsService = WsService();
 
@@ -17,27 +19,42 @@ class ParkingProvider extends ChangeNotifier {
   Map<int, String> get spotStatuses => _spotStatuses;
   int? get mySpotId => _mySpotId;
   DateTime? get myStartTime => _myStartTime;
+  DateTime? get myExpiresAt => _myExpiresAt;
   Map<String, dynamic>? get stats => _stats;
   List<dynamic> get history => _history;
   bool get loading => _loading;
 
   void init() {
+    if (_initialized) return;
+    _initialized = true;
     _wsService.connect();
     _wsService.stream.listen((data) {
       final spotId = data['spot_id'] as int?;
       final type = data['type'];
       if (spotId != null) {
-        _spotStatuses[spotId] = (type == 0) ? 'OCCUPIED' : 'FREE';
+        final newStatus = (type == 0) ? 'OCCUPIED' : 'FREE';
+        _spotStatuses[spotId] = newStatus;
+        // Также синхронизируем вложенный status внутри _zones, иначе
+        // экраны, отрисовывающиеся из zones (схема, сетка), застревают
+        // на устаревших данных.
+        for (final zone in _zones) {
+          for (final spot in (zone['spots'] as List? ?? [])) {
+            if ((spot as Map)['id'] == spotId) {
+              spot['status'] = newStatus;
+            }
+          }
+        }
 
         if (type == 1 && spotId == _mySpotId) {
           final source = data['source'];
           if (source != 'USER') {
             _mySpotId = null;
             _myStartTime = null;
+            _myExpiresAt = null;
           }
         }
-        notifyListeners();     // перерисовать карту немедленно
-        _refreshStats();       // обновить статистику с сервера
+        notifyListeners();     // перерисовать схему/карту немедленно
+        _refreshStats();       // обновить общую статистику с сервера
       }
     });
     loadAll();
@@ -85,15 +102,38 @@ class ParkingProvider extends ChangeNotifier {
 
   Future<void> loadMyParking() async {
     final data = await ApiService.getMyParking();
-    if (data != null) {
-      _mySpotId = data['spot_id'] as int?;
-      final startStr = data['start_time'] as String?;
-      if (startStr != null) {
-        _myStartTime = DateTime.tryParse(startStr);
+    if (data == null) return;
+
+    if (data.isEmpty) {
+      if (_mySpotId != null || _myStartTime != null || _myExpiresAt != null) {
+        _mySpotId = null;
+        _myStartTime = null;
+        _myExpiresAt = null;
+        notifyListeners();
       }
-    } else {
-      _mySpotId = null;
-      _myStartTime = null;
+      return;
+    }
+
+    final newSpotId = data['spot_id'] as int?;
+    final startStr = data['start_time'] as String?;
+    final expiresStr = data['expires_at'] as String?;
+    // Backend отдаёт время в UTC (ISO с 'Z'). .toLocal() переводит в
+    // часовой пояс устройства, иначе на телефоне в МСК часы покажутся
+    // со сдвигом -3.
+    final newStart = startStr != null
+        ? DateTime.tryParse(startStr)?.toLocal()
+        : null;
+    final newExpires = expiresStr != null
+        ? DateTime.tryParse(expiresStr)?.toLocal()
+        : null;
+
+    if (newSpotId != _mySpotId ||
+        newStart != _myStartTime ||
+        newExpires != _myExpiresAt) {
+      _mySpotId = newSpotId;
+      _myStartTime = newStart;
+      _myExpiresAt = newExpires;
+      notifyListeners();
     }
   }
 
@@ -109,15 +149,36 @@ class ParkingProvider extends ChangeNotifier {
     _history = await ApiService.getMyHistory();
   }
 
-  Future<Map<String, dynamic>> reserveSpot(int spotId) async {
-    final result = await ApiService.reserveSpot(spotId);
+  Future<Map<String, dynamic>> reserveSpot(int spotId, {Duration? duration}) async {
+    final result = await ApiService.reserveSpot(spotId, duration: duration);
     if (result['success'] == true) {
       _mySpotId = spotId;
       _myStartTime = DateTime.now();
+      final expiresStr = result['expires_at'] as String?;
+      _myExpiresAt = expiresStr != null
+          ? DateTime.tryParse(expiresStr)?.toLocal()
+          : (duration != null ? _myStartTime!.add(duration) : null);
       _spotStatuses[spotId] = 'OCCUPIED';
       await loadStats();
       await loadHistory();
       notifyListeners();
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> extendParking({required Duration duration}) async {
+    final spotId = _mySpotId;
+    if (spotId == null) {
+      return {'success': false, 'message': 'Нет активной парковки'};
+    }
+    final result =
+        await ApiService.extendParking(spotId, duration: duration);
+    if (result['success'] == true) {
+      final newExpires = result['expires_at'] as String?;
+      if (newExpires != null) {
+        _myExpiresAt = DateTime.tryParse(newExpires)?.toLocal();
+        notifyListeners();
+      }
     }
     return result;
   }
@@ -127,6 +188,7 @@ class ParkingProvider extends ChangeNotifier {
     if (result['success'] == true) {
       _mySpotId = null;
       _myStartTime = null;
+      _myExpiresAt = null;
       _spotStatuses[spotId] = 'FREE';
       await loadStats();
       await loadHistory();

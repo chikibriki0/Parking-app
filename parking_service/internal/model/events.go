@@ -21,4 +21,7 @@ type Event struct {
 	UserID    *int
 	Timestamp time.Time
 	Source    string // USER | SIMULATION
+	// Duration — желаемое время парковки (только для ReserveEvent).
+	// Zero значит «использовать дефолт сервиса».
+	Duration time.Duration
 }

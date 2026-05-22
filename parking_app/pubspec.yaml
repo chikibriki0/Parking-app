@@ -17,6 +17,13 @@ dependencies:
   jwt_decoder: ^2.0.1
   intl: ^0.19.0
   provider: ^6.1.1
+  google_fonts: ^6.2.1
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  url_launcher: ^6.3.0
+  geolocator: ^13.0.1
+  cached_network_image: ^3.4.1
+  local_auth: ^2.3.0
 
 dev_dependencies:
   flutter_test:

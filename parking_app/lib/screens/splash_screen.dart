@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../services/biometric_service.dart';
 import '../theme/app_theme.dart';
+import 'home_screen.dart';
 import 'login_screen.dart';
-import 'parking_map_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -36,10 +37,32 @@ class _SplashScreenState extends State<SplashScreen>
     await context.read<AuthProvider>().checkAuth();
     if (!mounted) return;
     final isLoggedIn = context.read<AuthProvider>().isLoggedIn;
+
+    // Если есть валидный токен + пользователь включил вход по биометрии —
+    // не пускаем сразу, а сначала просим приложить палец. В случае отказа
+    // отправляем на LoginScreen вводить пароль.
+    if (isLoggedIn) {
+      final bioEnabled = await BiometricService.isEnabled();
+      final canUse = await BiometricService.canUse();
+      if (bioEnabled && canUse) {
+        final ok = await BiometricService.authenticate(
+          reason: 'Войдите в Parking',
+        );
+        if (!mounted) return;
+        if (!ok) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+          );
+          return;
+        }
+      }
+    }
+
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) =>
-            isLoggedIn ? const ParkingMapScreen() : const LoginScreen(),
+            isLoggedIn ? const HomeScreen() : const LoginScreen(),
       ),
     );
   }

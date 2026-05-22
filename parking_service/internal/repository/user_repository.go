@@ -46,3 +46,15 @@ func (r *UserRepository) FindByEmail(email string) (*model.User, error) {
 
 	return user, nil
 }
+
+// FindByID — выборка по ID для /me. Пароль не возвращаем.
+func (r *UserRepository) FindByID(id int) (*model.User, error) {
+	user := &model.User{}
+	err := r.db.QueryRow(context.Background(),
+		`SELECT id, email, role, created_at FROM public.users WHERE id=$1`, id,
+	).Scan(&user.ID, &user.Email, &user.Role, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}

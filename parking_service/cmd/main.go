@@ -9,13 +9,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"net/mail"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rs/cors"
@@ -59,7 +62,12 @@ func main() {
 	// Симуляция включается отдельным флагом, чтобы прод-окружение
 	// не наполняло БД фейковыми событиями.
 	if cfg.SimulationEnabled {
-		log.Println("Simulation: ENABLED")
+		log.Println("Simulation: ENABLED — resetting demo state")
+		// Демо-сброс: убираем «висячие» сессии и зависшие OCCUPIED-места,
+		// чтобы каждый перезапуск начинался с чистой картинки.
+		if err := parkingRepo.ResetDemoState(); err != nil {
+			log.Println("demo reset error:", err)
+		}
 		stopSim := make(chan struct{})
 		go manager.SimulateTraffic(stopSim)
 		// drain simulation events
@@ -68,6 +76,12 @@ func main() {
 				log.Printf("[SIM] type=%v spot=%d source=%q",
 					event.Type, event.SpotID, event.Source)
 				if err := parkingService.HandleEvent(event); err != nil {
+					// Симуляция оптимистично пометила место в своём
+					// in-memory state до отправки. Если БД отказала
+					// (например, место уже занято пользователем),
+					// откатываем локальное состояние, чтобы потом
+					// симуляция не «освободила» эту бронь.
+					manager.RollbackLocalState(event)
 					log.Println("simulation event error:", err)
 					continue
 				}
@@ -245,19 +259,86 @@ func main() {
 			return
 		}
 		userID := r.Context().Value(service.UserIDKey).(int)
+
+		// duration принимаем как query-param ?duration=2h (формат time.Duration).
+		// Поддерживаются: 30m, 1h, 2h, 4h, 8h, 24h и любые корректные значения.
+		// Если не передан — используется дефолтный ExpireAfter сервиса.
+		duration := time.Duration(0)
+		if s := r.URL.Query().Get("duration"); s != "" {
+			if d, perr := time.ParseDuration(s); perr == nil {
+				duration = d
+			}
+		}
+		// Защитные пределы.
+		if duration > 24*time.Hour {
+			duration = 24 * time.Hour
+		}
+
+		now := time.Now()
 		event := model.Event{
 			Type: model.ReserveEvent, SpotID: id,
-			UserID: &userID, Source: model.SourceUser, Timestamp: time.Now(),
+			UserID:    &userID,
+			Source:    model.SourceUser,
+			Timestamp: now,
+			Duration:  duration,
 		}
 		if err := parkingService.HandleEvent(event); err != nil {
 			respondParkingError(w, err)
 			return
 		}
 		broadcastEvent(event)
+
+		// Считаем актуальный expires_at: если клиент передал duration —
+		// используем его, иначе дефолтный.
+		effectiveDur := duration
+		if effectiveDur <= 0 {
+			effectiveDur = cfg.ParkingExpireAfter
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"spot_id":    id,
-			"start_time": event.Timestamp,
+			"start_time": now,
+			"expires_at": now.Add(effectiveDur),
+		})
+	})))
+
+	mux.Handle("/extend/", service.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		// /extend/{spotId}?duration=1h — spotId оставлен для симметрии с reserve/release,
+		// фактически продлеваем активную сессию пользователя.
+		_, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/extend/"))
+		if err != nil {
+			http.Error(w, "invalid spot id", http.StatusBadRequest)
+			return
+		}
+		dur, err := time.ParseDuration(r.URL.Query().Get("duration"))
+		if err != nil || dur <= 0 {
+			http.Error(w, "invalid duration", http.StatusBadRequest)
+			return
+		}
+		if dur > 24*time.Hour {
+			dur = 24 * time.Hour
+		}
+		userID := r.Context().Value(service.UserIDKey).(int)
+		newExpires, err := parkingService.ExtendUserParking(userID, dur)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrNoActiveParking):
+				http.Error(w, "no active parking", http.StatusNotFound)
+			case errors.Is(err, service.ErrExtensionTooLong):
+				http.Error(w, "extension exceeds maximum total duration", http.StatusConflict)
+			default:
+				log.Println("extend error:", err)
+				http.Error(w, "server error", http.StatusInternalServerError)
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"expires_at": newExpires,
 		})
 	})))
 
@@ -284,9 +365,29 @@ func main() {
 		w.Write([]byte(`{"ok":true}`))
 	})))
 
+	mux.Handle("/me", service.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		userID := r.Context().Value(service.UserIDKey).(int)
+		user, err := userRepo.FindByID(userID)
+		if err != nil || user == nil {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":         user.ID,
+			"email":      user.Email,
+			"role":       user.Role,
+			"created_at": user.CreatedAt,
+		})
+	})))
+
 	mux.Handle("/my/parking", service.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value(service.UserIDKey).(int)
-		spotID, startTime, err := parkingService.GetActiveParking(userID)
+		spotID, startTime, expiresAt, err := parkingService.GetActiveParking(userID)
 		if err != nil {
 			if errors.Is(err, service.ErrNoActiveParking) {
 				http.Error(w, "No active parking", http.StatusNotFound)
@@ -296,7 +397,12 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		var expiresField interface{}
+		if !expiresAt.IsZero() {
+			expiresField = expiresAt
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
+			"expires_at": expiresField,
 			"spot_id": spotID, "start_time": startTime,
 		})
 	})))
@@ -392,8 +498,60 @@ func main() {
 		AllowCredentials: !contains(cfg.CORSAllowedOrigins, "*"),
 	})
 
-	log.Printf("Server started on %s", cfg.HTTPAddr)
-	log.Fatal(http.ListenAndServe(cfg.HTTPAddr, c.Handler(mux)))
+	// Final middleware chain: CORS → request logging → mux
+	handler := loggingMiddleware(c.Handler(mux))
+
+	server := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	// Graceful shutdown: ловим SIGINT/SIGTERM (Ctrl+C, docker stop).
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		log.Printf("Server started on %s", cfg.HTTPAddr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen error: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("Shutdown signal received, draining...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("graceful shutdown error: %v", err)
+	} else {
+		log.Println("HTTP server stopped")
+	}
+}
+
+// loggingMiddleware пишет в лог метод, путь, статус и время выполнения
+// каждого запроса — полезно для отладки на демо и для метрики качества кода.
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rec, r)
+		log.Printf("%s %s -> %d (%s)",
+			r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func respondParkingError(w http.ResponseWriter, err error) {

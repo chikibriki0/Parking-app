@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/parking_provider.dart';
 import 'screens/splash_screen.dart';
+import 'services/favorites_service.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // intl: грузим символы для русской локали (нужно для DateFormat('...', 'ru')).
+  await initializeDateFormatting('ru', null);
   runApp(const ParkingApp());
 }
 
@@ -19,11 +23,13 @@ class ParkingApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ParkingProvider()),
+        ChangeNotifierProvider(create: (_) => FavoritesService()..load()),
       ],
       child: MaterialApp(
-        title: 'Parking Service',
+        title: 'Parking',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.theme,
+        themeMode: ThemeMode.light,
+        theme: AppTheme.light,
         home: const SplashScreen(),
       ),
     );

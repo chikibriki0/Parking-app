@@ -26,6 +26,7 @@ func (r *ParkingRepository) StartParking(
 	userID *int,
 	spotID int,
 	start time.Time,
+	duration time.Duration,
 	source string,
 ) error {
 	log.Println("START PARKING CALLED:", userID, spotID)
@@ -78,11 +79,12 @@ func (r *ParkingRepository) StartParking(
 		return err
 	}
 
-	log.Println("INSERT SESSION:", *userID, spotID)
+	expiresAt := start.Add(duration)
+	log.Println("INSERT SESSION:", *userID, spotID, "expires_at", expiresAt)
 	_, err = tx.Exec(ctx,
-		`INSERT INTO parking_sessions (user_id, spot_id, start_time, source)
-		 VALUES ($1, $2, $3, $4)`,
-		*userID, spotID, start, source,
+		`INSERT INTO parking_sessions (user_id, spot_id, start_time, expires_at, source)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		*userID, spotID, start, expiresAt, source,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -104,7 +106,7 @@ func (r *ParkingRepository) EndParking(spotID int, end time.Time) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var userID int
+	var userID *int
 	var startTime time.Time
 	var source string
 
@@ -115,28 +117,31 @@ func (r *ParkingRepository) EndParking(spotID int, end time.Time) error {
 		spotID,
 	).Scan(&userID, &startTime, &source)
 
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+	hasSession := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	// Сессия найдена — переносим в историю и удаляем.
+	if hasSession {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO parking_history (user_id, spot_id, start_time, end_time, source)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			userID, spotID, startTime, end, source,
+		)
+		if err != nil {
+			return err
 		}
-		return err
+
+		_, err = tx.Exec(ctx,
+			`DELETE FROM parking_sessions WHERE spot_id = $1 AND end_time IS NULL`, spotID)
+		if err != nil {
+			return err
+		}
 	}
 
-	_, err = tx.Exec(ctx,
-		`INSERT INTO parking_history (user_id, spot_id, start_time, end_time, source)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		userID, spotID, startTime, end, source,
-	)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(ctx,
-		`DELETE FROM parking_sessions WHERE spot_id = $1 AND end_time IS NULL`, spotID)
-	if err != nil {
-		return err
-	}
-
+	// Статус места всегда переводим в FREE, даже если сессии не было
+	// (симуляция меняет статус без записи в parking_sessions).
 	_, err = tx.Exec(ctx,
 		`UPDATE parking_spots SET status = 'FREE' WHERE id = $1`, spotID)
 	if err != nil {
@@ -182,26 +187,142 @@ func (r *ParkingRepository) GetAllSpots() ([]model.SpotDTO, error) {
 	return spots, nil
 }
 
-func (r *ParkingRepository) GetActiveParking(userID int) (int, time.Time, error) {
+func (r *ParkingRepository) GetActiveParking(userID int) (int, time.Time, time.Time, error) {
 	var spotID int
 	var start time.Time
+	var expires *time.Time
 	err := r.db.QueryRow(context.Background(),
-		`SELECT spot_id, start_time FROM parking_sessions
+		`SELECT spot_id, start_time, expires_at FROM parking_sessions
 		 WHERE user_id = $1 AND end_time IS NULL`, userID,
-	).Scan(&spotID, &start)
+	).Scan(&spotID, &start, &expires)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, time.Time{}, service.ErrNoActiveParking
+		return 0, time.Time{}, time.Time{}, service.ErrNoActiveParking
 	}
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, time.Time{}, err
 	}
-	return spotID, start, nil
+	var exp time.Time
+	if expires != nil {
+		exp = *expires
+	}
+	return spotID, start, exp, nil
 }
 
-// ExpireOldSessions ends all sessions started before the cutoff, transactionally
-// moving them to history and freeing the corresponding spots. Returns the list
-// of expired spot IDs so the caller can broadcast WS updates.
-func (r *ParkingRepository) ExpireOldSessions(cutoff time.Time) ([]int, error) {
+// ExtendUserParking продлевает активную сессию пользователя:
+// expires_at += additional. Если суммарная длительность (от start_time
+// до нового expires_at) превышает maxTotal, возвращает ErrExtensionTooLong.
+// Возвращает обновлённый expires_at для ответа клиенту.
+func (r *ParkingRepository) ExtendUserParking(
+	userID int,
+	additional time.Duration,
+	maxTotal time.Duration,
+) (time.Time, error) {
+	ctx := context.Background()
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var spotID int
+	var startTime time.Time
+	var currentExpires *time.Time
+	err = tx.QueryRow(ctx,
+		`SELECT spot_id, start_time, expires_at
+		 FROM parking_sessions
+		 WHERE user_id = $1 AND end_time IS NULL
+		 FOR UPDATE`, userID,
+	).Scan(&spotID, &startTime, &currentExpires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, service.ErrNoActiveParking
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// База от которой считаем продление: текущий expires_at,
+	// или (если он отсутствует) start_time + дефолт.
+	var baseExpires time.Time
+	if currentExpires != nil {
+		baseExpires = *currentExpires
+	} else {
+		baseExpires = startTime
+	}
+	newExpires := baseExpires.Add(additional)
+
+	// Защита: не разрешаем продлить дольше maxTotal от старта.
+	if newExpires.Sub(startTime) > maxTotal {
+		return time.Time{}, service.ErrExtensionTooLong
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE parking_sessions
+		 SET expires_at = $1
+		 WHERE user_id = $2 AND end_time IS NULL`,
+		newExpires, userID)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return time.Time{}, err
+	}
+	return newExpires, nil
+}
+
+// HasActiveUserSession отвечает «true», если на месте есть активная
+// (end_time IS NULL) сессия с непустым user_id. Используется, чтобы
+// симуляция не сносила пользовательскую бронь.
+func (r *ParkingRepository) HasActiveUserSession(spotID int) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(context.Background(),
+		`SELECT EXISTS(
+			SELECT 1 FROM parking_sessions
+			WHERE spot_id = $1 AND end_time IS NULL AND user_id IS NOT NULL
+		)`, spotID).Scan(&exists)
+	return exists, err
+}
+
+// ResetDemoState освобождает все «висячие» состояния парковки. Удаляет
+// все активные сессии (с переносом в историю как INTERRUPTED) и
+// возвращает каждое место в FREE. Используется при старте сервера
+// в демо-режиме, чтобы перезапуск всегда начинался с чистой картинки.
+func (r *ParkingRepository) ResetDemoState() error {
+	ctx := context.Background()
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Активные пользовательские сессии перенесём в историю.
+	_, err = tx.Exec(ctx,
+		`INSERT INTO parking_history (user_id, spot_id, start_time, end_time, source)
+		 SELECT user_id, spot_id, start_time, NOW(), 'INTERRUPTED'
+		 FROM parking_sessions
+		 WHERE end_time IS NULL AND user_id IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `DELETE FROM parking_sessions WHERE end_time IS NULL`)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE parking_spots SET status = 'FREE' WHERE status <> 'FREE'`)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ExpireDueSessions ends all sessions whose expires_at has passed,
+// transactionally moving them to history and freeing the corresponding
+// spots. Returns the list of expired spot IDs so the caller can broadcast
+// WS updates.
+func (r *ParkingRepository) ExpireDueSessions(now time.Time) ([]int, error) {
 	ctx := context.Background()
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -212,7 +333,7 @@ func (r *ParkingRepository) ExpireOldSessions(cutoff time.Time) ([]int, error) {
 	rows, err := tx.Query(ctx,
 		`SELECT id, user_id, spot_id, start_time, COALESCE(source, 'SYSTEM')
 		 FROM parking_sessions
-		 WHERE end_time IS NULL AND start_time <= $1`, cutoff)
+		 WHERE end_time IS NULL AND expires_at IS NOT NULL AND expires_at <= $1`, now)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +360,6 @@ func (r *ParkingRepository) ExpireOldSessions(cutoff time.Time) ([]int, error) {
 		return nil, tx.Commit(ctx)
 	}
 
-	now := time.Now()
 	spotIDs := make([]int, 0, len(sessions))
 	for _, s := range sessions {
 		_, err = tx.Exec(ctx,

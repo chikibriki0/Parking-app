@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/confirm_dialog.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -98,43 +99,17 @@ class _AdminScreenState extends State<AdminScreen>
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           labelColor: AppTheme.primary,
           unselectedLabelColor: AppTheme.textSecondary,
           indicatorColor: AppTheme.primary,
+          labelStyle:
+              const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
           tabs: [
-            Tab(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.people_outline, size: 18),
-                  const SizedBox(width: 4),
-                  Text('Пользователи (${_users.length})'),
-                ],
-              ),
-            ),
-            Tab(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.directions_car_outlined, size: 18),
-                  const SizedBox(width: 4),
-                  Text('Активные (${_sessions.length})'),
-                ],
-              ),
-            ),
-            const Tab(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.history_rounded, size: 18),
-                  SizedBox(width: 4),
-                  Text('История'),
-                ],
-              ),
-            ),
+            Tab(text: 'Пользователи · ${_users.length}'),
+            Tab(text: 'Активные · ${_sessions.length}'),
+            const Tab(text: 'История'),
           ],
         ),
       ),
@@ -227,27 +202,16 @@ class _AdminScreenState extends State<AdminScreen>
             icon: const Icon(Icons.lock_open_rounded, color: AppTheme.danger),
             tooltip: 'Принудительно освободить',
             onPressed: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20)),
-                  title: const Text('Освободить место?'),
-                  content: Text(
-                      'Принудительно освободить место пользователя ${s['email']}?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Отмена'),
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.danger),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Освободить'),
-                    ),
-                  ],
-                ),
+              final confirmed = await showConfirmDialog(
+                context,
+                title: 'Освободить место принудительно?',
+                message:
+                    'Бронь пользователя ${s['email']} будет завершена. '
+                    'Действие нельзя отменить — пользователю придётся '
+                    'забронировать место заново.',
+                actionLabel: 'Освободить',
+                actionColor: AppTheme.danger,
+                actionIcon: Icons.lock_open_rounded,
               );
               if (confirmed == true) {
                 _adminRelease(spotId as int);
