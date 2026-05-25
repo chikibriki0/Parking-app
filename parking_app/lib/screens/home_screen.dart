@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/parking_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/active_parking_banner.dart';
+import '../widgets/offline_banner.dart';
 import 'bookings_screen.dart';
 import 'favorites_screen.dart';
 import 'map_screen.dart';
@@ -39,7 +40,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _pages),
+      body: Column(
+        children: [
+          // Тонкая красная полоса при потере соединения с сервером —
+          // чтобы пользователь видел, что кэшированные данные могут быть
+          // устаревшими, а не думал, что всё ок до первой ошибки бронирования.
+          const OfflineBanner(),
+          Expanded(child: IndexedStack(index: _index, children: _pages)),
+        ],
+      ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

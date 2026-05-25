@@ -12,6 +12,7 @@ class ParkingProvider extends ChangeNotifier {
   List<dynamic> _history = [];
   bool _loading = false;
   bool _initialized = false;
+  bool _isOnline = true;
 
   final WsService _wsService = WsService();
 
@@ -24,6 +25,12 @@ class ParkingProvider extends ChangeNotifier {
   List<dynamic> get history => _history;
   bool get loading => _loading;
 
+  /// true — WebSocket подключён к серверу. Используется в UI, чтобы
+  /// показать баннер «Нет соединения с сервером», когда сеть пропала.
+  /// Без этого баннера пользователь видит закэшированные данные и
+  /// думает, что всё ок, пока не упрётся в ошибку при бронировании.
+  bool get isOnline => _isOnline;
+
   void init() {
     if (_initialized) return;
     _initialized = true;
@@ -31,7 +38,19 @@ class ParkingProvider extends ChangeNotifier {
     // карту/брони/историю заново. Без этого сценарий «открыли приложение
     // без сети → включили wifi» оставляет пины зон МЭИ на «0/0», пока
     // пользователь не перезапустит приложение.
-    _wsService.onReconnected = () => loadAll();
+    _wsService.onReconnected = () {
+      if (!_isOnline) {
+        _isOnline = true;
+        notifyListeners();
+      }
+      loadAll();
+    };
+    _wsService.onDisconnected = () {
+      if (_isOnline) {
+        _isOnline = false;
+        notifyListeners();
+      }
+    };
     _wsService.connect();
     _wsService.stream.listen((data) {
       final spotId = data['spot_id'] as int?;

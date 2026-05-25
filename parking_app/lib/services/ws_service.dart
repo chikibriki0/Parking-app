@@ -27,6 +27,15 @@ class WsService {
   /// а триггера повторить нет).
   VoidCallback? onReconnected;
 
+  /// Callback при переходе «была сеть → пропала». Срабатывает один раз
+  /// на серию reconnect-попыток, не каждые 3 секунды. ParkingProvider
+  /// использует это чтобы показать баннер «Нет соединения с сервером».
+  VoidCallback? onDisconnected;
+
+  /// true если в данный момент мы считаем себя подключёнными
+  /// (получали ответы от сервера и не было свежей ошибки).
+  bool get isConnected => !_wasDisconnected;
+
   final StreamController<Map<String, dynamic>> _controller =
       StreamController.broadcast();
 
@@ -97,8 +106,15 @@ class WsService {
   void _scheduleReconnect() {
     if (_disposed) return;
     // Помечаем «снова не подключены», чтобы следующий успешный коннект
-    // снова дёрнул onReconnected.
-    _wasDisconnected = true;
+    // снова дёрнул onReconnected. Дёргаем onDisconnected ОДИН раз —
+    // только когда переходим из «было хорошо» в «начались проблемы»,
+    // не на каждом тике reconnect-loop.
+    if (!_wasDisconnected) {
+      _wasDisconnected = true;
+      debugPrint('[WS] connection lost → notifying listeners');
+      final cb = onDisconnected;
+      if (cb != null) cb();
+    }
     _connectedTimer?.cancel();
     _sub?.cancel();
     _sub = null;
