@@ -24,6 +24,12 @@ class _AdminScreenState extends State<AdminScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    // Перезагружаем данные при каждом переключении вкладки — иначе
+    // админ открывает «Историю» после изменений и видит то, что
+    // подгрузилось при первом открытии экрана.
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) _loadAll();
+    });
     _loadAll();
   }
 
