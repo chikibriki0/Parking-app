@@ -27,6 +27,11 @@ class ParkingProvider extends ChangeNotifier {
   void init() {
     if (_initialized) return;
     _initialized = true;
+    // Когда WS-соединение восстанавливается после оффлайна — перетягиваем
+    // карту/брони/историю заново. Без этого сценарий «открыли приложение
+    // без сети → включили wifi» оставляет пины зон МЭИ на «0/0», пока
+    // пользователь не перезапустит приложение.
+    _wsService.onReconnected = () => loadAll();
     _wsService.connect();
     _wsService.stream.listen((data) {
       final spotId = data['spot_id'] as int?;

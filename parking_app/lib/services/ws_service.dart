@@ -15,8 +15,17 @@ class WsService {
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
   Timer? _reconnectTimer;
+  Timer? _connectedTimer;
   bool _disposed = false;
+  bool _wasDisconnected = true; // true до первого подтверждённого коннекта
   int _attempt = 0;
+
+  /// Callback, который дёргается при переходе «не было сети → есть».
+  /// Используется ParkingProvider для перезагрузки карты, иначе после
+  /// возвращения сети пины зон МЭИ остаются «0/0» до перезапуска
+  /// приложения (HTTP-loadAll сделал запрос ещё в оффлайне и провалился,
+  /// а триггера повторить нет).
+  VoidCallback? onReconnected;
 
   final StreamController<Map<String, dynamic>> _controller =
       StreamController.broadcast();
@@ -40,6 +49,9 @@ class WsService {
 
     _sub = _channel!.stream.listen(
       (message) {
+        // Любое полученное сообщение = подтверждённый коннект. Если до
+        // этого мы были в оффлайне — дёргаем onReconnected для перезагрузки.
+        _markConnected();
         try {
           final data = jsonDecode(message);
           if (data is Map<String, dynamic>) {
@@ -64,10 +76,30 @@ class WsService {
     // До этого момента WebSocketChannel.connect ещё может вернуть ошибку.
     debugPrint('[WS] subscribed, awaiting messages…');
     _attempt = 0;
+
+    // Страховка: если в течение 2 секунд не пришло ни ошибки, ни сообщения,
+    // тоже считаем коннект подтверждённым. Иначе при тихой WS-сессии
+    // (например, симуляция отключена) onReconnected никогда не сработает,
+    // и карта так и останется пустой после возврата сети.
+    _connectedTimer?.cancel();
+    _connectedTimer = Timer(const Duration(seconds: 2), _markConnected);
+  }
+
+  void _markConnected() {
+    _connectedTimer?.cancel();
+    if (!_wasDisconnected) return;
+    _wasDisconnected = false;
+    debugPrint('[WS] connection confirmed → triggering data reload');
+    final cb = onReconnected;
+    if (cb != null) cb();
   }
 
   void _scheduleReconnect() {
     if (_disposed) return;
+    // Помечаем «снова не подключены», чтобы следующий успешный коннект
+    // снова дёрнул onReconnected.
+    _wasDisconnected = true;
+    _connectedTimer?.cancel();
     _sub?.cancel();
     _sub = null;
     try {
@@ -81,6 +113,7 @@ class WsService {
   void dispose() {
     _disposed = true;
     _reconnectTimer?.cancel();
+    _connectedTimer?.cancel();
     _sub?.cancel();
     try {
       _channel?.sink.close();
