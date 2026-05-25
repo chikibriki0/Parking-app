@@ -9,10 +9,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/mail"
 	"os/signal"
@@ -552,6 +555,27 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack пробрасывает интерфейс http.Hijacker из обёрнутого ResponseWriter.
+// Без этого метода gorilla/websocket не может «забрать» TCP-соединение для
+// апгрейда до WS и хендлер /ws падает с HTTP 500 — а из-за молчаливой
+// потери интерфейса при оборачивании WriteHeader-recorder'ом это ошибка,
+// которую легко проглядеть. См. https://pkg.go.dev/net/http#Hijacker
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+	}
+	return h.Hijack()
+}
+
+// Flush также пробрасывается — нужен для streaming-ответов (SSE и пр.),
+// если когда-нибудь добавится. Не критично сейчас, но дёшево.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func respondParkingError(w http.ResponseWriter, err error) {
