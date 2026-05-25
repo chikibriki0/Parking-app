@@ -201,6 +201,22 @@ class ParkingProvider extends ChangeNotifier {
     return _spotStatuses[spotId] ?? 'FREE';
   }
 
+  /// Полный сброс пользовательских данных. Вызывается при logout и при
+  /// логине новым пользователем — иначе ChangeNotifier живёт всё время
+  /// работы приложения и хранит историю/брони предыдущего юзера,
+  /// которые новый видит у себя в профиле.
+  void resetUserState() {
+    _mySpotId = null;
+    _myStartTime = null;
+    _myExpiresAt = null;
+    _history = [];
+    _stats = null;
+    _spotStatuses.clear();
+    _zones = [];
+    // _initialized оставляем как есть — WS-соединение пере-открывать не надо.
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _wsService.dispose();

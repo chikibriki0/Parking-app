@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/parking_provider.dart';
 import 'screens/splash_screen.dart';
+import 'services/cars_service.dart';
 import 'services/favorites_service.dart';
 import 'theme/app_theme.dart';
 
@@ -24,6 +25,7 @@ class ParkingApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ParkingProvider()),
         ChangeNotifierProvider(create: (_) => FavoritesService()..load()),
+        ChangeNotifierProvider(create: (_) => CarsService()..bindUser(null)),
       ],
       child: MaterialApp(
         title: 'Parking',

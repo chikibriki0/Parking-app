@@ -2,12 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/parking_provider.dart';
 import '../services/api_service.dart';
 import '../services/biometric_service.dart';
+import '../services/cars_service.dart';
+import '../services/favorites_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/confirm_dialog.dart';
 import 'home_screen.dart';
 import 'register_screen.dart';
+
+/// Пост-логин-настройка: сбрасываем данные предыдущего пользователя
+/// и привязываем сервисы (избранное, машины) к новому userId. Иначе
+/// у новичка в профиле появится история, машины и избранное предыдущего
+/// аккаунта на устройстве.
+Future<void> applyAuthChange(BuildContext context) async {
+  final auth = context.read<AuthProvider>();
+  context.read<ParkingProvider>().resetUserState();
+  await context.read<FavoritesService>().bindUser(auth.userId);
+  await context.read<CarsService>().bindUser(auth.userId);
+}
 
 /// LoginScreen — экран входа в духе референса.
 ///
@@ -72,6 +86,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (result['success'] == true) {
+      // Перебиндить сервисы под нового пользователя ДО навигации на Home —
+      // иначе HomeScreen увидит чужие машины/избранное.
+      if (mounted) await applyAuthChange(context);
       // Если биометрия уже включена — обновим доверенный токен на свежий
       // (вдруг JWT_SECRET на сервере менялся).
       if (await BiometricService.isEnabled()) {
@@ -130,6 +147,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     final loggedIn = context.read<AuthProvider>().isLoggedIn;
     if (loggedIn) {
+      // Привязка сервисов под нового пользователя при биометрическом входе.
+      await applyAuthChange(context);
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );

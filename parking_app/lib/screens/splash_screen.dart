@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/biometric_service.dart';
+import '../services/cars_service.dart';
+import '../services/favorites_service.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import 'login_screen.dart';
@@ -59,6 +61,16 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     if (!mounted) return;
+    // Привязка per-user сервисов к восстановленному из токена userId —
+    // без этого на старте загружаются «гостевые» данные, и Profile
+    // показывает пустые машины/избранное, пока пользователь не выйдет
+    // и не залогинится заново.
+    if (isLoggedIn) {
+      final userId = context.read<AuthProvider>().userId;
+      await context.read<FavoritesService>().bindUser(userId);
+      await context.read<CarsService>().bindUser(userId);
+      if (!mounted) return;
+    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) =>

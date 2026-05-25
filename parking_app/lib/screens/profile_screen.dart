@@ -3,8 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../providers/parking_provider.dart';
+import '../services/cars_service.dart';
+import '../services/favorites_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/confirm_dialog.dart';
+import 'add_car_screen.dart';
 import 'admin_screen.dart';
 import 'login_screen.dart';
 
@@ -35,37 +38,7 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           _SectionTitle('Автомобили'),
-          _SettingsGroup(
-            tiles: [
-              _SettingsTile(
-                icon: Icons.directions_car_rounded,
-                iconColor: AppTheme.primary,
-                title: 'А 777 АА 77',
-                trailing: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    'Основной',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ),
-              _SettingsTile(
-                icon: Icons.add_rounded,
-                iconColor: AppTheme.primary,
-                title: 'Добавить автомобиль',
-                titleColor: AppTheme.primary,
-                onTap: () => _comingSoon(context, 'Добавление автомобиля'),
-              ),
-            ],
-          ),
+          _CarsSection(),
           const SizedBox(height: 24),
 
           _SectionTitle('Оплата'),
@@ -132,6 +105,13 @@ class ProfileScreen extends StatelessWidget {
                   );
                   if (confirmed != true) return;
                   await auth.logout();
+                  // Чистим все per-user данные, иначе следующий пользователь
+                  // на этом устройстве увидит чужие машины/избранное/историю.
+                  if (context.mounted) {
+                    context.read<ParkingProvider>().resetUserState();
+                    context.read<FavoritesService>().clear();
+                    context.read<CarsService>().clear();
+                  }
                   if (context.mounted) {
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -267,6 +247,111 @@ class _StatsCard extends StatelessWidget {
   }
 }
 
+/// Секция «Автомобили»: список реальных машин пользователя из CarsService
+/// + кнопка добавления. Заменяет прежнюю единственную захардкоженную
+/// «А 777 АА 77», которая показывалась у всех пользователей одинаково.
+class _CarsSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final cars = context.watch<CarsService>();
+    final tiles = <Widget>[];
+
+    for (final car in cars.cars) {
+      tiles.add(_SettingsTile(
+        icon: Icons.directions_car_rounded,
+        iconColor: AppTheme.primary,
+        title: car.displayPlate,
+        subtitle: 'СТС ${car.displaySts}',
+        trailing: car.primary
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'Основной',
+                  style: TextStyle(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                  ),
+                ),
+              )
+            : const Icon(Icons.chevron_right_rounded,
+                color: AppTheme.textSecondary),
+        onTap: () => _showCarActions(context, car),
+      ));
+    }
+
+    tiles.add(_SettingsTile(
+      icon: Icons.add_rounded,
+      iconColor: AppTheme.primary,
+      title: 'Добавить автомобиль',
+      titleColor: AppTheme.primary,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AddCarScreen()),
+      ),
+    ));
+
+    return _SettingsGroup(tiles: tiles);
+  }
+
+  Future<void> _showCarActions(BuildContext context, UserCar car) async {
+    final cars = context.read<CarsService>();
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              title: Text(car.displayPlate,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text('СТС ${car.displaySts}'),
+            ),
+            const Divider(height: 1),
+            if (!car.primary)
+              ListTile(
+                leading: const Icon(Icons.star_rounded, color: AppTheme.primary),
+                title: const Text('Сделать основным'),
+                onTap: () async {
+                  await cars.setPrimary(car.plate);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded,
+                  color: AppTheme.danger),
+              title: const Text('Удалить',
+                  style: TextStyle(color: AppTheme.danger)),
+              onTap: () async {
+                await cars.remove(car.plate);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _StatCell extends StatelessWidget {
   final String value;
   final String label;
@@ -357,6 +442,7 @@ class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
   final String title;
+  final String? subtitle;
   final Color? titleColor;
   final Widget? trailing;
   final VoidCallback? onTap;
@@ -364,6 +450,7 @@ class _SettingsTile extends StatelessWidget {
     required this.icon,
     required this.iconColor,
     required this.title,
+    this.subtitle,
     this.titleColor,
     this.trailing,
     this.onTap,
@@ -388,13 +475,29 @@ class _SettingsTile extends StatelessWidget {
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: titleColor ?? AppTheme.textPrimary,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: titleColor ?? AppTheme.textPrimary,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             if (trailing != null) trailing!,
