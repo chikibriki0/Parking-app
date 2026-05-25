@@ -261,8 +261,6 @@ class _StatsCard extends StatelessWidget {
           Expanded(child: _StatCell(value: '$activeNow', label: 'Активных')),
           _VerticalSeparator(),
           Expanded(child: _StatCell(value: '$totalBookings', label: 'Всего\nбронирований')),
-          _VerticalSeparator(),
-          const Expanded(child: _StatCell(value: '4.9', label: 'Рейтинг')),
         ],
       ),
     );
