@@ -1,9 +1,14 @@
 /// AppConfig — все настраиваемые URL-ы и параметры окружения.
 ///
 /// Передаются через `--dart-define` при сборке, например:
-///   flutter build apk --dart-define=API_BASE_URL=https://parking.example.com --dart-define=WS_BASE_URL=wss://parking.example.com/ws
+///   flutter build apk --release \
+///     --dart-define=API_BASE_URL=http://79.137.195.136:8080 \
+///     --dart-define=MAPTILER_KEY=xxx
 /// или для отладки:
-///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080 --dart-define=WS_BASE_URL=ws://10.0.2.2:8080/ws
+///   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
+///
+/// WebSocket-URL автоматически выводится из API_BASE_URL — отдельно
+/// передавать его НЕ нужно. http → ws, https → wss, путь /ws.
 ///
 /// Дефолты подобраны под Android-эмулятор (10.0.2.2 → localhost хоста).
 class AppConfig {
@@ -12,10 +17,28 @@ class AppConfig {
     defaultValue: 'http://10.0.2.2:8080',
   );
 
-  static const String wsUrl = String.fromEnvironment(
-    'WS_BASE_URL',
-    defaultValue: 'ws://10.0.2.2:8080/ws',
-  );
+  /// WebSocket-URL, выведенный из apiBaseUrl. Меняем только схему
+  /// (http/https → ws/wss) и добавляем путь /ws — host и порт остаются
+  /// теми же, что у API. Это исключает класс ошибок «забыл передать
+  /// WS_BASE_URL при сборке APK», когда HTTP работает, а WS уходит
+  /// в эмуляторный 10.0.2.2 и молча отваливается.
+  static String get wsUrl {
+    final api = apiBaseUrl;
+    final String wsScheme;
+    if (api.startsWith('https://')) {
+      wsScheme = 'wss://';
+    } else if (api.startsWith('http://')) {
+      wsScheme = 'ws://';
+    } else {
+      // Конфиг без схемы — фолбэк на ws://.
+      wsScheme = 'ws://';
+    }
+    // Срезаем «http(s)://» и любой завершающий «/».
+    final hostPort = api
+        .replaceFirst(RegExp(r'^https?://'), '')
+        .replaceAll(RegExp(r'/$'), '');
+    return '$wsScheme$hostPort/ws';
+  }
 
   /// API-ключ MapTiler. Получить можно на https://cloud.maptiler.com
   /// (бесплатно ~100 000 запросов/месяц). Пустая строка — fallback на OSM.
