@@ -246,3 +246,15 @@ const List<ParkingLocation> kParkings = [
   ..._realParkings,
   ..._fakeParkings,
 ];
+
+/// Маппинг технического имени зоны из БД («A», «B», «C») в
+/// человекочитаемое название («НИУ МЭИ · корпус А» и т.д.). Используется
+/// в админ-панели и в карточке активной парковки, чтобы пользователь
+/// видел осмысленный адрес, а не однобуквенный идентификатор.
+String friendlyZoneName(String? dbName) {
+  if (dbName == null || dbName.isEmpty) return '—';
+  for (final p in _realParkings) {
+    if (p.zoneName == dbName) return p.title;
+  }
+  return 'Зона $dbName';
+}

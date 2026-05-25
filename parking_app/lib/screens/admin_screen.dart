@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../model/parking_location.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/confirm_dialog.dart';
@@ -195,9 +196,9 @@ class _AdminScreenState extends State<AdminScreen>
             child: const Icon(Icons.local_parking_rounded,
                 color: AppTheme.danger, size: 24),
           ),
-          title: s['email'] as String? ?? '—',
+          title: s['email'] as String? ?? 'Без пользователя',
           subtitle:
-              'Место: ${s['spot_number']} · Зона: ${s['zone_name'] ?? '—'}\nНачало: ${_formatDate(s['start_time'])}',
+              '${friendlyZoneName(s['zone_name'] as String?)} · место №${s['spot_number']}\nНачало: ${_formatDate(s['start_time'])}',
           trailing: IconButton(
             icon: const Icon(Icons.lock_open_rounded, color: AppTheme.danger),
             tooltip: 'Принудительно освободить',
@@ -244,9 +245,9 @@ class _AdminScreenState extends State<AdminScreen>
             child: const Icon(Icons.history_rounded,
                 color: AppTheme.textSecondary, size: 24),
           ),
-          title: h['email'] as String? ?? '—',
+          title: h['email'] as String? ?? 'Без пользователя',
           subtitle:
-              'Место: ${h['spot_number']} · Зона: ${h['zone_name'] ?? '—'}\n${_formatDate(h['start_time'])} → ${_formatDate(h['end_time'])}',
+              '${friendlyZoneName(h['zone_name'] as String?)} · место №${h['spot_number']}\n${_formatDate(h['start_time'])} → ${_formatDate(h['end_time'])}',
           trailing: null,
         );
       },

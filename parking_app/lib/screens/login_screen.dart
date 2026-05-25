@@ -16,11 +16,22 @@ import 'register_screen.dart';
 /// и привязываем сервисы (избранное, машины) к новому userId. Иначе
 /// у новичка в профиле появится история, машины и избранное предыдущего
 /// аккаунта на устройстве.
+///
+/// Дополнительно вызывается ParkingProvider.loadAll() — иначе после
+/// сброса _zones === [] карта показывает «0/0» на пинах до тех пор,
+/// пока пользователь не сделает свайп-pull-to-refresh или не перезайдёт
+/// в приложение.
 Future<void> applyAuthChange(BuildContext context) async {
   final auth = context.read<AuthProvider>();
-  context.read<ParkingProvider>().resetUserState();
+  final parking = context.read<ParkingProvider>();
+  parking.resetUserState();
   await context.read<FavoritesService>().bindUser(auth.userId);
   await context.read<CarsService>().bindUser(auth.userId);
+  // Перезагружаем карту/брони/историю под новый JWT-токен. Не await'им
+  // во избежание блокировки UI: данные приедут асинхронно и провайдер
+  // вызовет notifyListeners() — карта обновится сама.
+  // ignore: unawaited_futures
+  parking.loadAll();
 }
 
 /// LoginScreen — экран входа в духе референса.
