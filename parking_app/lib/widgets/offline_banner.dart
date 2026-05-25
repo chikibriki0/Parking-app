@@ -30,30 +30,35 @@ class _OfflineBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppTheme.danger,
-      child: SafeArea(
-        top: false,
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: const [
-              Icon(Icons.cloud_off_rounded, color: Colors.white, size: 16),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Нет соединения с сервером. Данные могут быть устаревшими.',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.danger,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.danger.withOpacity(0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
-        ),
+        ],
+      ),
+      child: Row(
+        children: const [
+          Icon(Icons.cloud_off_rounded, color: Colors.white, size: 18),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Нет соединения с сервером',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

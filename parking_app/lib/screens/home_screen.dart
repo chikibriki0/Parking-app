@@ -40,18 +40,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
-        children: [
-          // Тонкая красная полоса при потере соединения с сервером —
-          // чтобы пользователь видел, что кэшированные данные могут быть
-          // устаревшими, а не думал, что всё ок до первой ошибки бронирования.
-          const OfflineBanner(),
-          Expanded(child: IndexedStack(index: _index, children: _pages)),
-        ],
-      ),
+      body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Полоса «Нет соединения с сервером» — над всем остальным внизу,
+          // чтобы не конфликтовать с notch'ем телефона и быть всегда
+          // в зоне видимости пользователя.
+          const OfflineBanner(),
           // На вкладке «Бронирования» (index 1) активная парковка уже
           // показана большой синей карточкой — не дублируем баннером.
           if (_index != 1) const ActiveParkingBanner(),
