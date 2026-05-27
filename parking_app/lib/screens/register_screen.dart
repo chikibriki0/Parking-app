@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import 'home_screen.dart';
+import 'login_screen.dart' show applyAuthChange;
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -46,41 +50,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (!mounted) return;
 
-    if (result['success'] == true) {
-      _showSuccess();
-    } else {
+    if (result['success'] != true) {
       setState(() {
         _error = result['message'] ?? 'Ошибка регистрации';
         _loading = false;
       });
+      return;
     }
-  }
 
-  void _showSuccess() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle, color: AppTheme.success),
-            SizedBox(width: 10),
-            Text('Готово!'),
-          ],
-        ),
-        content: const Text('Аккаунт успешно создан. Войдите в систему.'),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pop();
-            },
-            child: const Text('Войти'),
-          ),
-        ],
-      ),
-    );
+    // Сразу логинимся с теми же credentials — иначе пользователь
+    // возвращается на LoginScreen и руками вводит то, что только что
+    // ввёл при регистрации. Это типичный UX-антипаттерн.
+    final loginResult =
+        await context.read<AuthProvider>().login(email, password);
+    if (!mounted) return;
+
+    if (loginResult['success'] == true) {
+      await applyAuthChange(context);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (_) => false,
+      );
+    } else {
+      // Редчайший случай — регистрация удалась, авто-логин нет. Возвращаем
+      // на LoginScreen с понятным сообщением.
+      setState(() {
+        _error = 'Аккаунт создан, но войти не удалось. Войдите вручную.';
+        _loading = false;
+      });
+    }
   }
 
   @override
