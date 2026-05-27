@@ -126,7 +126,7 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: 24),
           Center(
             child: Text(
-              'Parking Service · ВКР НИУ «МЭИ»',
+              'Моя парковка · ВКР НИУ «МЭИ»',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

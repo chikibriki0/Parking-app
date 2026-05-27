@@ -91,7 +91,7 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
                 const SizedBox(height: 24),
                 const Text(
-                  'Parking Service',
+                  'Моя парковка',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 32,

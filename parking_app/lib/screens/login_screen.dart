@@ -108,7 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const _IllustrationPanel(),
               const SizedBox(height: 28),
               Text(
-                'Parking Service',
+                'Моя парковка',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.displayMedium?.copyWith(
                       fontSize: 28,

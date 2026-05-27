@@ -28,7 +28,7 @@ class ParkingApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CarsService()..bindUser(null)),
       ],
       child: MaterialApp(
-        title: 'Parking',
+        title: 'Моя парковка',
         debugShowCheckedModeBanner: false,
         themeMode: ThemeMode.light,
         theme: AppTheme.light,
