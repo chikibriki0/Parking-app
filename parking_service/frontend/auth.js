@@ -66,7 +66,7 @@ if (loginForm) {
       loginButton.innerText = "Входим...";
       showLoader("Выполняем вход...");
 
-      const response = await fetch("http://localhost:8080/login", {
+      const response = await fetch("/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -131,7 +131,7 @@ if (registerForm) {
       registerButton.innerText = "Регистрируем...";
       showLoader("Создаём аккаунт...");
 
-      const response = await fetch("http://localhost:8080/register", {
+      const response = await fetch("/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"

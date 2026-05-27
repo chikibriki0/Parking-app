@@ -44,7 +44,11 @@ if (!token) {
   window.location.href = "login.html";
 }
 
-const ws = new WebSocket("ws://localhost:8080/ws");
+// WebSocket-URL строим из текущего origin страницы — иначе при открытии
+// фронта с удалённого сервера браузер пытается стучаться в localhost
+// своего же устройства, где сервер не запущен.
+const wsScheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+const ws = new WebSocket(`${wsScheme}//${window.location.host}/ws`);
 
 const spots = {};
 const spotMeta = {};
@@ -66,7 +70,7 @@ document.getElementById("logoutBtn").addEventListener("click", () => {
 
 async function loadMyParking() {
   try {
-    const response = await fetch("http://localhost:8080/my/parking", {
+    const response = await fetch("/my/parking", {
       headers: {
         "Authorization": "Bearer " + token
       }
@@ -97,7 +101,7 @@ async function loadMyParking() {
 
 async function loadParkingMap() {
   try {
-    const response = await fetch("http://localhost:8080/parking/map");
+    const response = await fetch("/parking/map");
 
     if (!response.ok) {
       console.error("Ошибка загрузки карты");
@@ -143,7 +147,7 @@ async function loadParkingMap() {
                 let response;
             showLoader("Освобождаем место...");
             if (spot.id === mySpot) {
-              response = await fetch(`http://localhost:8080/release/${spot.id}`, {
+              response = await fetch(`/release/${spot.id}`, {
                 method: "POST",
                 headers: {
                   "Authorization": "Bearer " + token
@@ -177,7 +181,7 @@ async function loadParkingMap() {
             if (status === "FREE") {
               showLoader("Переносим бронирование...");
               if (mySpot !== null) {
-                await fetch(`http://localhost:8080/release/${mySpot}`, {
+                await fetch(`/release/${mySpot}`, {
                   method: "POST",
                   headers: {
                     "Authorization": "Bearer " + token
@@ -185,7 +189,7 @@ async function loadParkingMap() {
                 });
               }
               showLoader("Бронируем место...");
-              response = await fetch(`http://localhost:8080/reserve/${spot.id}`, {
+              response = await fetch(`/reserve/${spot.id}`, {
                 method: "POST",
                 headers: {
                   "Authorization": "Bearer " + token
@@ -264,7 +268,7 @@ ws.onmessage = (event) => {
 
 async function loadStats() {
   try {
-    const res = await fetch("http://localhost:8080/stats");
+    const res = await fetch("/stats");
     const data = await res.json();
 
     document.getElementById("statsCards").innerHTML = `
@@ -279,7 +283,7 @@ async function loadStats() {
 
 async function loadHistory() {
   try {
-    const response = await fetch("http://localhost:8080/my/history", {
+    const response = await fetch("/my/history", {
       headers: {
         "Authorization": "Bearer " + token
       }
