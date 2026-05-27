@@ -3,12 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../providers/parking_provider.dart';
-import '../services/api_service.dart';
-import '../services/biometric_service.dart';
 import '../services/cars_service.dart';
 import '../services/favorites_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/confirm_dialog.dart';
 import 'home_screen.dart';
 import 'register_screen.dart';
 
@@ -34,16 +31,13 @@ Future<void> applyAuthChange(BuildContext context) async {
   parking.loadAll();
 }
 
-/// LoginScreen — экран входа в духе референса.
+/// LoginScreen — экран входа.
 ///
 /// Содержит:
 /// - иллюстрационную панель сверху (без зависимости от внешних ассетов —
 ///   composition из иконок и градиентов);
 /// - поля Email + Пароль с иконками и переключателем видимости;
 /// - кнопку «Войти», ссылку «Забыли пароль?»;
-/// - разделитель «или»;
-/// - кнопку «Войти по отпечатку» (показывается только если на устройстве
-///   есть биометрия и пользователь её ранее включил);
 /// - футер «Нет аккаунта? Зарегистрироваться».
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -58,23 +52,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   String? _error;
   bool _obscurePassword = true;
-  bool _showBiometric = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _resolveBiometricButton();
-  }
-
-  /// Кнопка «Войти по отпечатку» показывается только если:
-  /// - устройство поддерживает биометрию,
-  /// - пользователь ранее включил её в настройках (после первого логина).
-  Future<void> _resolveBiometricButton() async {
-    final canUse = await BiometricService.canUse();
-    final enabled = await BiometricService.isEnabled();
-    if (!mounted) return;
-    setState(() => _showBiometric = canUse && enabled);
-  }
 
   @override
   void dispose() {
@@ -100,33 +77,6 @@ class _LoginScreenState extends State<LoginScreen> {
       // Перебиндить сервисы под нового пользователя ДО навигации на Home —
       // иначе HomeScreen увидит чужие машины/избранное.
       if (mounted) await applyAuthChange(context);
-      // Если биометрия уже включена — обновим доверенный токен на свежий
-      // (вдруг JWT_SECRET на сервере менялся).
-      if (await BiometricService.isEnabled()) {
-        final t = await ApiService.getToken();
-        if (t != null) await BiometricService.saveToken(t);
-      }
-      // Если биометрия доступна, но ещё не включена — предложим её включить.
-      final canUse = await BiometricService.canUse();
-      final already = await BiometricService.isEnabled();
-      if (canUse && !already && mounted) {
-        final ok = await showConfirmDialog(
-          context,
-          title: 'Включить вход по отпечатку?',
-          message:
-              'В следующий раз вы сможете быстро войти в Parking, '
-              'не вводя email и пароль — приложите палец к сенсору.',
-          actionLabel: 'Включить',
-          actionIcon: Icons.fingerprint_rounded,
-        );
-        if (ok == true) {
-          await BiometricService.setEnabled(true);
-          // Сохраняем свежий JWT в отдельное «биометрическое» хранилище —
-          // оно переживёт logout.
-          final t = await ApiService.getToken();
-          if (t != null) await BiometricService.saveToken(t);
-        }
-      }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -135,41 +85,6 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         _error = result['message'] ?? 'Ошибка входа';
         _loading = false;
-      });
-    }
-  }
-
-  Future<void> _loginByBiometric() async {
-    final ok = await BiometricService.authenticate(
-      reason: 'Войдите в Parking по отпечатку',
-    );
-    if (!ok || !mounted) return;
-    // Достаём «доверенный» токен — он сохранён при первом успешном
-    // паролю-логине с согласием на биометрию и переживает logout.
-    final trusted = await BiometricService.getToken();
-    if (trusted == null) {
-      setState(() => _error = 'Сначала войдите по паролю, чтобы включить отпечаток');
-      return;
-    }
-    // Кладём токен обратно как «основной», чтобы AuthProvider и ApiService
-    // его подхватили.
-    await ApiService.saveToken(trusted);
-    await context.read<AuthProvider>().checkAuth();
-    if (!mounted) return;
-    final loggedIn = context.read<AuthProvider>().isLoggedIn;
-    if (loggedIn) {
-      // Привязка сервисов под нового пользователя при биометрическом входе.
-      await applyAuthChange(context);
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
-    } else {
-      // Сохранённый JWT просрочен. Чистим и просим войти паролем.
-      await BiometricService.setEnabled(false);
-      setState(() {
-        _showBiometric = false;
-        _error = 'Сессия истекла, войдите по паролю';
       });
     }
   }
@@ -271,45 +186,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: const Text('Забыли пароль?'),
                 ),
               ),
-              const SizedBox(height: 8),
-              const _Divider(label: 'или'),
-              const SizedBox(height: 16),
-              if (_showBiometric)
-                SizedBox(
-                  height: 52,
-                  child: OutlinedButton.icon(
-                    onPressed: _loginByBiometric,
-                    icon: const Icon(Icons.fingerprint_rounded, size: 22),
-                    label: const Text('Войти по отпечатку'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: BorderSide(
-                          color: AppTheme.primary.withOpacity(0.4)),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      textStyle: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                )
-              else
-                SizedBox(
-                  height: 52,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _comingSoon('Вход по QR-коду'),
-                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 22),
-                    label: const Text('Войти по QR-коду'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: BorderSide(
-                          color: AppTheme.primary.withOpacity(0.4)),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      textStyle: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
               const SizedBox(height: 22),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -467,22 +343,3 @@ class _IllustrationPanel extends StatelessWidget {
   }
 }
 
-class _Divider extends StatelessWidget {
-  final String label;
-  const _Divider({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Expanded(child: Divider(color: AppTheme.separator)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(label,
-              style: const TextStyle(color: AppTheme.textSecondary)),
-        ),
-        const Expanded(child: Divider(color: AppTheme.separator)),
-      ],
-    );
-  }
-}
