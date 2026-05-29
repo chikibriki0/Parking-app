@@ -650,24 +650,22 @@ class _ParkingDetailsScreenState extends State<ParkingDetailsScreen> {
         button: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // «Продлить» — компактная синяя кнопка с иконкой плюса
+            // «Продлить» — квадратная кнопка с одной иконкой «+».
+            // На узких экранах (Pocophone F1) полноценный текст «Продлить»
+            // вместе с «Освободить» съедал слишком много места, и
+            // счётчик обратного отсчёта уходил под кнопку. Иконочный
+            // вариант экономит ~80 пикселей и решает наложение.
             SizedBox(
+              width: 50,
               height: 50,
               child: FilledButton(
                 style: FilledButton.styleFrom(
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  padding: EdgeInsets.zero,
                 ),
                 onPressed: _extendMine,
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.add_rounded, size: 20),
-                    SizedBox(width: 4),
-                    Text('Продлить'),
-                  ],
-                ),
+                child: const Icon(Icons.add_rounded, size: 26),
               ),
             ),
             const SizedBox(width: 8),
